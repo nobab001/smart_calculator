@@ -85,6 +85,7 @@ class FloatingWindowService : Service() {
 
         var bubbleLastX = 80 + (id - 1) * 100
         var bubbleLastY = 300 + (id - 1) * 150
+        var bubblePositionSaved = false
 
         var widthPx: Int = -1
         var heightPx: Int = -1
@@ -213,13 +214,13 @@ class FloatingWindowService : Service() {
         if (manualInstances.size > 1) {
             manualInstances.forEachIndexed { index, inst ->
                 if (inst.titleText == "Calculator") {
-                    inst.titleText = "Calculator ${index + 1}"
+                    inst.titleText = "Calculator${index + 1}"
                     inst.floatView?.findViewById<TextView>(R.id.tvFloatTitle)?.text = inst.titleText
                 }
             }
         } else if (manualInstances.size == 1) {
             val inst = manualInstances[0]
-            if (inst.titleText.startsWith("Calculator ")) {
+            if (inst.titleText.matches(Regex("Calculator\\d+"))) {
                 inst.titleText = "Calculator"
                 inst.floatView?.findViewById<TextView>(R.id.tvFloatTitle)?.text = inst.titleText
             }
@@ -277,11 +278,27 @@ class FloatingWindowService : Service() {
         // Dynamic text size based on digit count
         val digitCount = bubbleText.count { it.isDigit() }
         val textSizeSp = when {
-            digitCount <= 3 -> 16f
-            digitCount <= 5 -> 12f
-            else -> 14f
+            digitCount <= 3 -> 20f
+            digitCount <= 5 -> 16f
+            else -> 18f
         }
         tvBubble?.textSize = textSizeSp
+
+        // Snap to right edge on first minimize
+        if (!instance.bubblePositionSaved) {
+            view.post {
+                val screenW = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                    wm.currentWindowMetrics.bounds.width()
+                else
+                    @Suppress("DEPRECATION") wm.defaultDisplay.width
+                val bubbleW = if (view.width > 0) view.width else dpToPx(36)
+                params.x = screenW - bubbleW
+                try { wm.updateViewLayout(view, params) } catch (_: Exception) {}
+                instance.bubbleLastX = params.x
+                instance.bubbleLastY = params.y
+                instance.bubblePositionSaved = true
+            }
+        }
 
         var initX = 0; var initY = 0; var initRx = 0f; var initRy = 0f; var moved = false
 
@@ -328,6 +345,7 @@ class FloatingWindowService : Service() {
         try { wm.updateViewLayout(bv, params) } catch (_: Exception) {}
         instance.bubbleLastX = params.x
         instance.bubbleLastY = params.y
+        instance.bubblePositionSaved = true
     }
 
     private fun getBubbleText(instance: ManualInstance): String {
@@ -653,7 +671,7 @@ class FloatingWindowService : Service() {
                                 }
 
                                 val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
-                                imm.showSoftInput(etTitle, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                                imm.showSoftInput(etTitle, android.view.inputmethod.InputMethodManager.SHOW_FORCED)
                             }
                             lastClickTime = clickTime
                         }
