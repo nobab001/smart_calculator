@@ -648,19 +648,24 @@ class FloatingWindowService : Service() {
                         val dy = ev.rawY - initRy
                         if (Math.abs(dx) <= 8 && Math.abs(dy) <= 8 && !isDragging) {
                             if (clickTime - lastClickTime < 300L) {
-                                tvTitle.visibility = View.GONE
-                                etTitle.visibility = View.VISIBLE
-                                etTitle.setText(instance.titleText)
-                                etTitle.selectAll()
-                                etTitle.requestFocus()
-
+                                // 1. Make window focusable FIRST
                                 instance.params?.let { p ->
                                     p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
                                     try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
                                 }
 
-                                val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
-                                imm.showSoftInput(etTitle, android.view.inputmethod.InputMethodManager.SHOW_FORCED)
+                                // 2. Show EditText with current text
+                                tvTitle.visibility = View.GONE
+                                etTitle.visibility = View.VISIBLE
+                                etTitle.setText(instance.titleText)
+
+                                // 3. After layout settles: focus + select all + open keyboard
+                                etTitle.post {
+                                    etTitle.requestFocus()
+                                    etTitle.selectAll()
+                                    val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                                    imm.showSoftInput(etTitle, android.view.inputmethod.InputMethodManager.SHOW_FORCED)
+                                }
                             }
                             lastClickTime = clickTime
                         }
