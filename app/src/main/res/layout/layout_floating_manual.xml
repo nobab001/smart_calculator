@@ -74,8 +74,6 @@
             android:layout_weight="1.5"
             android:orientation="vertical"
             android:gravity="bottom|end"
-            android:paddingLeft="16dp"
-            android:paddingRight="16dp"
             android:paddingTop="4dp"
             android:paddingBottom="0dp">
 
@@ -86,7 +84,9 @@
                 android:layout_weight="3.5"
                 android:fillViewport="true"
                 android:scrollbars="none"
-                android:overScrollMode="never">
+                android:overScrollMode="never"
+                android:layout_marginLeft="3dp"
+                android:layout_marginRight="3dp">
 
                 <TextView
                     android:id="@+id/tvFloatExpression"
@@ -99,26 +99,48 @@
                     android:textSize="18sp"/>
             </HorizontalScrollView>
 
-            <TextView
-                android:id="@+id/tvFloatResult"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="6.5"
-                android:text="0"
-                android:textColor="@color/text_primary"
-                android:gravity="end|bottom"
-                android:singleLine="true"
-                android:ellipsize="start"
-                android:fontFamily="sans-serif-light"
-                android:includeFontPadding="false"
-                android:autoSizeTextType="uniform"
-                app:autoSizeTextType="uniform"
-                android:autoSizeMinTextSize="12sp"
-                android:autoSizeMaxTextSize="44sp"
-                app:autoSizeMinTextSize="12sp"
-                app:autoSizeMaxTextSize="44sp"
-                android:autoSizeStepGranularity="1sp"
-                app:autoSizeStepGranularity="1sp"/>
+                android:orientation="horizontal"
+                android:gravity="bottom">
+
+                <TextView
+                    android:id="@+id/tvFloatOperator"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="22sp"
+                    android:fontFamily="sans-serif-medium"
+                    android:text=""
+                    android:layout_marginLeft="16dp"
+                    android:layout_marginRight="8dp"
+                    android:layout_marginBottom="4dp"
+                    android:includeFontPadding="false"/>
+
+                <TextView
+                    android:id="@+id/tvFloatResult"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:text="0"
+                    android:textColor="@color/text_primary"
+                    android:gravity="end|bottom"
+                    android:singleLine="true"
+                    android:ellipsize="start"
+                    android:fontFamily="sans-serif-light"
+                    android:includeFontPadding="false"
+                    android:paddingRight="16dp"
+                    android:autoSizeTextType="uniform"
+                    app:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="12sp"
+                    android:autoSizeMaxTextSize="44sp"
+                    app:autoSizeMinTextSize="12sp"
+                    app:autoSizeMaxTextSize="44sp"
+                    android:autoSizeStepGranularity="1sp"
+                    app:autoSizeStepGranularity="1sp"/>
+            </LinearLayout>
         </LinearLayout>
 
         <!-- Divider -->

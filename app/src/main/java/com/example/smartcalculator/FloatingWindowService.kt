@@ -157,6 +157,7 @@ class FloatingWindowService : Service() {
         val display  = v.findViewById<TextView>(R.id.tvFloatResult)
         val exprView = v.findViewById<TextView>(R.id.tvFloatExpression)
         val svExpr   = v.findViewById<android.widget.HorizontalScrollView>(R.id.svFloatExpression)
+        val opView   = v.findViewById<TextView>(R.id.tvFloatOperator)
 
         // ── helpers ──────────────────────────────────────────────────────
 
@@ -193,11 +194,18 @@ class FloatingWindowService : Service() {
             if (floatJustEquals) {
                 display.text  = fmtNum(floatExprDisplay.toString().ifEmpty { "0" })
                 exprView.text = ""
+                opView?.text  = ""
             } else {
                 val expr = floatExprDisplay.toString()
                 val calcExpr = floatExprCalc.toString()
                 val lastOp = expr.indexOfLast { it == '+' || it == '−' || it == '×' || it == '÷' }
                 
+                if (lastOp >= 0) {
+                    opView?.text = expr[lastOp].toString()
+                } else {
+                    opView?.text = ""
+                }
+
                 if (endsWithOp()) {
                     val opCount = countBinaryOperators(calcExpr)
                     if (opCount >= 2) {
@@ -866,6 +874,8 @@ class FloatingWindowService : Service() {
             // Icon tints (ImageButtons in header)
             tintImageButtons(root, colorSecondary)
 
+            root.findViewById<TextView>(R.id.tvFloatOperator)?.setTextColor(colorSecondary)
+
             if (!isManual) {
                 // Custom text/button colors for Smart mode in Dark
                 // (expression items are colored dynamically in refreshSmartDisplay)
@@ -907,6 +917,8 @@ class FloatingWindowService : Service() {
 
             // Icon tints (ImageButtons in header)
             tintImageButtons(root, colorSecondary)
+
+            root.findViewById<TextView>(R.id.tvFloatOperator)?.setTextColor(colorSecondary)
 
             if (!isManual) {
                 // Custom text/button colors for Smart mode in Light
