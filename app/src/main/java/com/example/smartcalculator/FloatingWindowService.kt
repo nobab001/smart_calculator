@@ -142,11 +142,15 @@ class FloatingWindowService : Service() {
 
         applyPopupTheme(view, PopupThemeManager.getManualTheme(this), isManual = true)
 
-        // Fixed initial size: 300 × 415 dp — GridLayout fills remaining space
-        val params = buildParams(300, 415)
+        // Fixed initial size: 300 × 360 dp — GridLayout fills remaining space
+        val params = buildParams(300, 360)
         wireManualButtons(view)
         makeDraggable(view.findViewById(R.id.floatManualHeader), view, params)
-        attachResizeHandle(view.findViewById(R.id.resizeHandle), view, params)
+        val resizeRight = view.findViewById<View>(R.id.resizeRight)
+        val resizeLeft = view.findViewById<View>(R.id.resizeLeft)
+        if (resizeRight != null && resizeLeft != null) {
+            attachManualResizeHandles(resizeRight, resizeLeft, view, params)
+        }
         wm.addView(view, params)
     }
 
@@ -167,15 +171,51 @@ class FloatingWindowService : Service() {
 
         fun toCalcOp(op: String) = CalculatorEngine.toCalcOp(op)
 
+        fun countBinaryOperators(expr: String): Int {
+            var count = 0
+            for (i in expr.indices) {
+                val c = expr[i]
+                if (c == '+' || c == '*' || c == '/') {
+                    count++
+                } else if (c == '-') {
+                    if (i > 0) {
+                        val prev = expr[i - 1]
+                        if (prev.isDigit() || prev == '.') {
+                            count++
+                        }
+                    }
+                }
+            }
+            return count
+        }
+
         fun update() {
             if (floatJustEquals) {
                 display.text  = fmtNum(floatExprDisplay.toString().ifEmpty { "0" })
                 exprView.text = ""
             } else {
-                val cur = currentNumber()
-                display.text = fmtNum(cur.ifEmpty { "0" })
-                val expr   = floatExprDisplay.toString()
+                val expr = floatExprDisplay.toString()
+                val calcExpr = floatExprCalc.toString()
                 val lastOp = expr.indexOfLast { it == '+' || it == '−' || it == '×' || it == '÷' }
+                
+                if (endsWithOp()) {
+                    val opCount = countBinaryOperators(calcExpr)
+                    if (opCount >= 2) {
+                        val subExpr = calcExpr.substring(0, calcExpr.length - 1)
+                        val result = CalculatorEngine.eval(subExpr)
+                        if (result.isNaN() || result.isInfinite()) {
+                            display.text = "Error"
+                        } else {
+                            display.text = fmtNum(fmtResult(result))
+                        }
+                    } else {
+                        val subExpr = calcExpr.substring(0, calcExpr.length - 1)
+                        display.text = fmtNum(subExpr.ifEmpty { "0" })
+                    }
+                } else {
+                    val cur = currentNumber()
+                    display.text = fmtNum(cur.ifEmpty { "0" })
+                }
                 exprView.text = if (lastOp >= 0) expr.substring(0, lastOp + 1) else ""
             }
         }
@@ -190,33 +230,6 @@ class FloatingWindowService : Service() {
             if (floatExprCalc.length < 30) {
                 floatExprDisplay.append(d); floatExprCalc.append(d)
             }
-            update()
-        }
-
-        fun onDoubleZero() {
-            val cur = currentNumber()
-            if (cur.isEmpty() || cur == "0") return
-            if (floatJustEquals) {
-                floatExprDisplay.clear(); floatExprCalc.clear()
-                floatHasDecimal = false; floatJustEquals = false
-            }
-            if (floatExprCalc.length < 29) {
-                floatExprDisplay.append("00"); floatExprCalc.append("00")
-            }
-            update()
-        }
-
-        fun onDecimal() {
-            if (floatHasDecimal) return
-            if (floatJustEquals) {
-                floatExprDisplay.clear(); floatExprCalc.clear()
-                floatHasDecimal = false; floatJustEquals = false
-            }
-            if (endsWithOp() || floatExprCalc.isEmpty()) {
-                floatExprDisplay.append("0"); floatExprCalc.append("0")
-            }
-            floatExprDisplay.append("."); floatExprCalc.append(".")
-            floatHasDecimal = true
             update()
         }
 
@@ -256,30 +269,6 @@ class FloatingWindowService : Service() {
             update()
         }
 
-        fun onPercent() {
-            if (floatJustEquals) floatJustEquals = false
-            val num = currentNumber().toDoubleOrNull() ?: return
-            val dispExpr = floatExprDisplay.toString()
-            val calcExpr = floatExprCalc.toString()
-            val lastOpD = dispExpr.indexOfLast { it == '+' || it == '−' || it == '×' || it == '÷' }
-            val lastOpC = calcExpr.indexOfLast  { it == '+' || it == '-' || it == '*' || it == '/' }
-            val pctVal: Double = if (lastOpD >= 0) {
-                val base = CalculatorEngine.eval(calcExpr.substring(0, lastOpC))
-                val finalBase = if (base.isNaN()) 0.0 else base
-                if (finalBase.isInfinite()) num / 100.0 else finalBase * (num / 100.0)
-            } else num / 100.0
-            val pctStr = fmtResult(pctVal)
-            if (lastOpD >= 0) {
-                floatExprDisplay.clear(); floatExprDisplay.append(dispExpr.substring(0, lastOpD + 1) + pctStr)
-                floatExprCalc.clear();    floatExprCalc.append(calcExpr.substring(0, lastOpC + 1) + pctStr)
-            } else {
-                floatExprDisplay.clear(); floatExprDisplay.append(pctStr)
-                floatExprCalc.clear();    floatExprCalc.append(pctStr)
-            }
-            floatHasDecimal = pctStr.contains('.')
-            update()
-        }
-
         fun onBackspace() {
             if (floatJustEquals) {
                 resetCalcState(); display.text = "0"; exprView.text = ""; return
@@ -304,15 +293,11 @@ class FloatingWindowService : Service() {
             v.findViewById<MaterialButton>(id).setOnClickListener { onDigit(d) }
         }
 
-        v.findViewById<MaterialButton>(R.id.btnFloat00).setOnClickListener        { onDoubleZero() }
-        v.findViewById<MaterialButton>(R.id.btnFloatDecimal).setOnClickListener   { onDecimal() }
         v.findViewById<MaterialButton>(R.id.btnFloatClear).setOnClickListener     { resetCalcState(); display.text = "0"; exprView.text = "" }
         v.findViewById<MaterialButton>(R.id.btnFloatBackspace).setOnClickListener { onBackspace() }
-        v.findViewById<MaterialButton>(R.id.btnFloatPercent).setOnClickListener   { onPercent() }
         v.findViewById<MaterialButton>(R.id.btnFloatAdd).setOnClickListener       { onOperator("+") }
         v.findViewById<MaterialButton>(R.id.btnFloatSubtract).setOnClickListener  { onOperator("−") }
         v.findViewById<MaterialButton>(R.id.btnFloatMultiply).setOnClickListener  { onOperator("×") }
-        v.findViewById<MaterialButton>(R.id.btnFloatDivide).setOnClickListener    { onOperator("÷") }
         v.findViewById<MaterialButton>(R.id.btnFloatEquals).setOnClickListener    { onEquals() }
 
         v.findViewById<ImageButton>(R.id.btnFloatMinimize).setOnClickListener { dockToBubble() }
@@ -674,9 +659,15 @@ class FloatingWindowService : Service() {
      * Dragging the handle changes the window's width and height in real time.
      * Minimum: 240 × 330 dp  |  Maximum: 90 % of screen dimensions.
      */
-    private fun attachResizeHandle(handle: View, root: View, params: LayoutParams) {
-        val minW = dpToPx(240); val minH = dpToPx(330)
-        var startW = 0; var startH = 0; var startRx = 0f; var startRy = 0f
+    private fun attachManualResizeHandles(
+        handleRight: View,
+        handleLeft: View,
+        root: View,
+        params: LayoutParams
+    ) {
+        val minW = dpToPx(180); val minH = dpToPx(240)
+        var startW = 0; var startH = 0; var startX = 0
+        var startRx = 0f; var startRy = 0f
 
         val screenW: Int; val screenH: Int
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
@@ -690,7 +681,7 @@ class FloatingWindowService : Service() {
         }
         val maxW = (screenW * 0.9).toInt(); val maxH = (screenH * 0.9).toInt()
 
-        handle.setOnTouchListener { _, ev ->
+        handleRight.setOnTouchListener { _, ev ->
             when (ev.action) {
                 MotionEvent.ACTION_DOWN -> {
                     startW  = params.width.takeIf { it > 0 } ?: root.width
@@ -700,6 +691,28 @@ class FloatingWindowService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     val newW = (startW + (ev.rawX - startRx).toInt()).coerceIn(minW, maxW)
                     val newH = (startH + (ev.rawY - startRy).toInt()).coerceIn(minH, maxH)
+                    params.width = newW; params.height = newH
+                    wm.updateViewLayout(root, params); true
+                }
+                else -> false
+            }
+        }
+
+        handleLeft.setOnTouchListener { _, ev ->
+            when (ev.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    startW  = params.width.takeIf { it > 0 } ?: root.width
+                    startH  = params.height.takeIf { it > 0 } ?: root.height
+                    startX  = params.x
+                    startRx = ev.rawX; startRy = ev.rawY; true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (ev.rawX - startRx).toInt()
+                    val newW = (startW - dx).coerceIn(minW, maxW)
+                    val newH = (startH + (ev.rawY - startRy).toInt()).coerceIn(minH, maxH)
+                    
+                    val actualDx = startW - newW
+                    params.x = startX + actualDx
                     params.width = newW; params.height = newH
                     wm.updateViewLayout(root, params); true
                 }
@@ -918,10 +931,10 @@ class FloatingWindowService : Service() {
         val numberIds = listOf(
             R.id.btnFloat0, R.id.btnFloat1, R.id.btnFloat2, R.id.btnFloat3,
             R.id.btnFloat4, R.id.btnFloat5, R.id.btnFloat6, R.id.btnFloat7,
-            R.id.btnFloat8, R.id.btnFloat9, R.id.btnFloat00, R.id.btnFloatDecimal
+            R.id.btnFloat8, R.id.btnFloat9
         )
-        val funcIds = listOf(R.id.btnFloatClear, R.id.btnFloatPercent, R.id.btnFloatBackspace)
-        val opIds = listOf(R.id.btnFloatDivide, R.id.btnFloatMultiply, R.id.btnFloatSubtract, R.id.btnFloatAdd)
+        val funcIds = listOf(R.id.btnFloatClear, R.id.btnFloatBackspace)
+        val opIds = listOf(R.id.btnFloatMultiply, R.id.btnFloatSubtract, R.id.btnFloatAdd)
         val eqId = R.id.btnFloatEquals
 
         val numBg = Color.parseColor(if (isDark) "#FF3A3A3C" else "#FFFFFFFF")

@@ -20,7 +20,10 @@
         android:layout_height="match_parent"
         android:orientation="vertical"
         android:background="@drawable/bg_float_window"
-        android:clipToOutline="true">
+        android:clipToOutline="true"
+        android:layout_marginLeft="2dp"
+        android:layout_marginRight="2dp"
+        android:layout_marginBottom="2dp">
 
         <!-- ── Drag / Title bar ── -->
         <LinearLayout
@@ -67,36 +70,54 @@
         <!-- ── Display ── -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="90dp"
+            android:layout_height="0dp"
+            android:layout_weight="1.2"
             android:orientation="vertical"
             android:gravity="bottom|end"
             android:paddingLeft="16dp"
             android:paddingRight="16dp"
-            android:paddingBottom="8dp">
+            android:paddingTop="4dp"
+            android:paddingBottom="0dp">
 
             <TextView
                 android:id="@+id/tvFloatExpression"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="0dp"
+                android:layout_weight="3.5"
                 android:textColor="@color/text_secondary"
-                android:textSize="14sp"
-                android:gravity="end"
+                android:gravity="end|bottom"
                 android:singleLine="true"
                 android:ellipsize="start"
-                android:fontFamily="sans-serif-light"/>
+                android:fontFamily="sans-serif-light"
+                android:autoSizeTextType="uniform"
+                app:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="10sp"
+                android:autoSizeMaxTextSize="24sp"
+                app:autoSizeMinTextSize="10sp"
+                app:autoSizeMaxTextSize="24sp"
+                android:autoSizeStepGranularity="1sp"
+                app:autoSizeStepGranularity="1sp"/>
 
             <TextView
                 android:id="@+id/tvFloatResult"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="0dp"
+                android:layout_weight="6.5"
                 android:text="0"
                 android:textColor="@color/text_primary"
-                android:textSize="44sp"
-                android:gravity="end"
+                android:gravity="end|bottom"
                 android:singleLine="true"
                 android:ellipsize="start"
                 android:fontFamily="sans-serif-light"
-                android:includeFontPadding="false"/>
+                android:includeFontPadding="false"
+                android:autoSizeTextType="uniform"
+                app:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="12sp"
+                android:autoSizeMaxTextSize="44sp"
+                app:autoSizeMinTextSize="12sp"
+                app:autoSizeMaxTextSize="44sp"
+                android:autoSizeStepGranularity="1sp"
+                app:autoSizeStepGranularity="1sp"/>
         </LinearLayout>
 
         <!-- Divider -->
@@ -109,55 +130,19 @@
         <GridLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"
+            android:layout_weight="3.8"
             android:columnCount="4"
-            android:rowCount="5"
-            android:padding="4dp"
+            android:rowCount="4"
+            android:padding="1dp"
+            android:layout_marginLeft="2dp"
+            android:layout_marginRight="2dp"
+            android:layout_marginBottom="2dp"
             android:useDefaultMargins="false">
 
-            <!-- Row 1: AC  %  ⌫  ÷ -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnFloatClear"
-                style="@style/CalcButtonFunction"
-                android:text="AC"
-                android:textSize="13sp"
-                android:textAllCaps="false"
-                android:layout_columnWeight="1"
-                android:layout_rowWeight="1"
-                android:layout_width="0dp"
-                android:layout_height="0dp"/>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnFloatPercent"
-                style="@style/CalcButtonFunction"
-                android:text="%"
-                android:layout_columnWeight="1"
-                android:layout_rowWeight="1"
-                android:layout_width="0dp"
-                android:layout_height="0dp"/>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnFloatBackspace"
-                style="@style/CalcButtonFunction"
-                android:text="⌫"
-                android:layout_columnWeight="1"
-                android:layout_rowWeight="1"
-                android:layout_width="0dp"
-                android:layout_height="0dp"/>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnFloatDivide"
-                style="@style/CalcButtonOperator"
-                android:text="÷"
-                android:layout_columnWeight="1"
-                android:layout_rowWeight="1"
-                android:layout_width="0dp"
-                android:layout_height="0dp"/>
-
-            <!-- Row 2: 7  8  9  × -->
+            <!-- Row 1: 7  8  9  × -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloat7"
-                style="@style/CalcButtonNumber"
+                style="@style/CalcFloatButtonNumber"
                 android:text="7"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
@@ -166,7 +151,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloat8"
-                style="@style/CalcButtonNumber"
+                style="@style/CalcFloatButtonNumber"
                 android:text="8"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
@@ -175,7 +160,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloat9"
-                style="@style/CalcButtonNumber"
+                style="@style/CalcFloatButtonNumber"
                 android:text="9"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
@@ -184,17 +169,17 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloatMultiply"
-                style="@style/CalcButtonOperator"
+                style="@style/CalcFloatButtonOperator"
                 android:text="×"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
                 android:layout_width="0dp"
                 android:layout_height="0dp"/>
 
-            <!-- Row 3: 4  5  6  − -->
+            <!-- Row 2: 4  5  6  − -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloat4"
-                style="@style/CalcButtonNumber"
+                style="@style/CalcFloatButtonNumber"
                 android:text="4"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
@@ -203,7 +188,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloat5"
-                style="@style/CalcButtonNumber"
+                style="@style/CalcFloatButtonNumber"
                 android:text="5"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
@@ -212,7 +197,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloat6"
-                style="@style/CalcButtonNumber"
+                style="@style/CalcFloatButtonNumber"
                 android:text="6"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
@@ -221,17 +206,17 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloatSubtract"
-                style="@style/CalcButtonOperator"
+                style="@style/CalcFloatButtonOperator"
                 android:text="−"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
                 android:layout_width="0dp"
                 android:layout_height="0dp"/>
 
-            <!-- Row 4: 1  2  3  + -->
+            <!-- Row 3: 1  2  3  + -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloat1"
-                style="@style/CalcButtonNumber"
+                style="@style/CalcFloatButtonNumber"
                 android:text="1"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
@@ -240,7 +225,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloat2"
-                style="@style/CalcButtonNumber"
+                style="@style/CalcFloatButtonNumber"
                 android:text="2"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
@@ -249,7 +234,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloat3"
-                style="@style/CalcButtonNumber"
+                style="@style/CalcFloatButtonNumber"
                 android:text="3"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
@@ -258,19 +243,19 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloatAdd"
-                style="@style/CalcButtonOperator"
+                style="@style/CalcFloatButtonOperator"
                 android:text="+"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
                 android:layout_width="0dp"
                 android:layout_height="0dp"/>
 
-            <!-- Row 5: 00  0  .  = -->
+            <!-- Row 4: AC  0  ⌫  = -->
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnFloat00"
-                style="@style/CalcButtonNumber"
-                android:text="00"
-                android:textSize="15sp"
+                android:id="@+id/btnFloatClear"
+                style="@style/CalcFloatButtonFunction"
+                android:text="AC"
+                android:textAllCaps="false"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
                 android:layout_width="0dp"
@@ -278,7 +263,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloat0"
-                style="@style/CalcButtonNumber"
+                style="@style/CalcFloatButtonNumber"
                 android:text="0"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
@@ -286,9 +271,9 @@
                 android:layout_height="0dp"/>
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnFloatDecimal"
-                style="@style/CalcButtonNumber"
-                android:text="."
+                android:id="@+id/btnFloatBackspace"
+                style="@style/CalcFloatButtonFunction"
+                android:text="⌫"
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
                 android:layout_width="0dp"
@@ -296,7 +281,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFloatEquals"
-                style="@style/CalcButtonEquals"
+                style="@style/CalcFloatButtonEquals"
                 android:text="="
                 android:layout_columnWeight="1"
                 android:layout_rowWeight="1"
@@ -307,16 +292,22 @@
 
     </LinearLayout>
 
-    <!-- ── Resize handle – bottom-right corner drag target ── -->
-    <ImageView
-        android:id="@+id/resizeHandle"
-        android:layout_width="28dp"
-        android:layout_height="28dp"
+    <!-- Bottom-right invisible resize handle -->
+    <View
+        android:id="@+id/resizeRight"
+        android:layout_width="18dp"
+        android:layout_height="18dp"
         android:layout_gravity="bottom|end"
-        android:src="@drawable/ic_resize_corner"
-        android:padding="4dp"
-        android:contentDescription="Resize"
         android:clickable="true"
-        android:focusable="true"/>
+        android:focusable="true" />
+
+    <!-- Bottom-left invisible resize handle -->
+    <View
+        android:id="@+id/resizeLeft"
+        android:layout_width="18dp"
+        android:layout_height="18dp"
+        android:layout_gravity="bottom|start"
+        android:clickable="true"
+        android:focusable="true" />
 
 </FrameLayout>
