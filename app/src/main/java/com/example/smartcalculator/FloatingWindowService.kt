@@ -263,14 +263,25 @@ class FloatingWindowService : Service() {
         val view = inflate(R.layout.layout_floating_bubble)
         instance.bubbleView = view
 
-        val params = buildParams(LayoutParams.WRAP_CONTENT, 24).apply {
+        val params = buildParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.TOP or Gravity.START
             x = instance.bubbleLastX
             y = instance.bubbleLastY
         }
         instance.bubbleParams = params
 
-        view.findViewById<TextView>(R.id.tvBubbleText)?.text = getBubbleText(instance)
+        val bubbleText = getBubbleText(instance)
+        val tvBubble = view.findViewById<TextView>(R.id.tvBubbleText)
+        tvBubble?.text = bubbleText
+
+        // Dynamic text size based on digit count
+        val digitCount = bubbleText.count { it.isDigit() }
+        val textSizeSp = when {
+            digitCount <= 3 -> 16f
+            digitCount <= 5 -> 12f
+            else -> 14f
+        }
+        tvBubble?.textSize = textSizeSp
 
         var initX = 0; var initY = 0; var initRx = 0f; var initRy = 0f; var moved = false
 
@@ -312,7 +323,7 @@ class FloatingWindowService : Service() {
             wm.currentWindowMetrics.bounds.width()
         else
             @Suppress("DEPRECATION") wm.defaultDisplay.width
-        val bubbleW = if (bv.width > 0) bv.width else dpToPx(24)
+        val bubbleW = if (bv.width > 0) bv.width else dpToPx(36)
         params.x = if (params.x + bubbleW / 2 < screenW / 2) 0 else screenW - bubbleW
         try { wm.updateViewLayout(bv, params) } catch (_: Exception) {}
         instance.bubbleLastX = params.x
@@ -321,9 +332,16 @@ class FloatingWindowService : Service() {
 
     private fun getBubbleText(instance: ManualInstance): String {
         val calcExpr = instance.floatExprCalc.toString()
+
+        fun formatWithLimit(value: String): String {
+            val formatted = fmtNum(value)
+            val digitCount = formatted.count { it.isDigit() }
+            return if (digitCount > 5) instance.id.toString() else formatted
+        }
+
         if (instance.floatJustEquals) {
             val total = instance.floatExprDisplay.toString().ifEmpty { "0" }
-            return fmtNum(total)
+            return formatWithLimit(total)
         }
 
         val endsWithOp = calcExpr.lastOrNull()?.let { it == '+' || it == '-' || it == '*' || it == '/' } ?: false
@@ -346,13 +364,15 @@ class FloatingWindowService : Service() {
                 val subExpr = calcExpr.substring(0, calcExpr.length - 1)
                 val result = CalculatorEngine.eval(subExpr)
                 if (!result.isNaN() && !result.isInfinite()) {
-                    return fmtNum(fmtResult(result))
+                    return formatWithLimit(fmtResult(result))
                 }
             }
         }
 
         if (instance.titleText != "Calculator" && !instance.titleText.startsWith("Calculator ")) {
-            return instance.titleText.take(1)
+            val titleFallback = instance.titleText.take(1)
+            val digitCount = titleFallback.count { it.isDigit() }
+            return if (digitCount > 5) instance.id.toString() else titleFallback
         }
 
         return instance.id.toString()

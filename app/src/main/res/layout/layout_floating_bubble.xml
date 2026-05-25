@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Minimized bubble — 24×24dp oval, draggable, tap to restore -->
+<!-- Minimized bubble — 36dp height oval, draggable, tap to restore -->
 <FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/bubbleRoot"
     android:layout_width="wrap_content"
-    android:layout_height="24dp"
-    android:minWidth="24dp"
-    android:paddingLeft="6dp"
-    android:paddingRight="6dp"
+    android:layout_height="36dp"
+    android:minWidth="36dp"
+    android:paddingLeft="8dp"
+    android:paddingRight="8dp"
     android:background="@drawable/bg_bubble"
     android:elevation="8dp">
 
@@ -18,7 +18,7 @@
         android:layout_gravity="center"
         android:text="⊞"
         android:textColor="#FF1C1C1E"
-        android:textSize="11sp"
+        android:textSize="14sp"
         android:singleLine="true"
         android:fontFamily="sans-serif-light"/>
 
