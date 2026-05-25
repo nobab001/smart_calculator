@@ -173,7 +173,8 @@ class FloatingWindowService : Service() {
 
     private fun showManualInstance(instance: ManualInstance) {
         if (instance.floatView != null && !instance.isMinimized) return
-        
+
+        val restoringFromBubble = instance.isMinimized
         if (instance.isMinimized) {
             removeInstanceBubble(instance)
             instance.isMinimized = false
@@ -184,7 +185,10 @@ class FloatingWindowService : Service() {
 
         applyPopupTheme(view, PopupThemeManager.getManualTheme(this), isManual = true)
 
-        updateInstanceTitles()
+        // Only update titles when creating (not restoring), to preserve custom titles
+        if (!restoringFromBubble) {
+            updateInstanceTitles()
+        }
 
         // Set the title
         view.findViewById<TextView>(R.id.tvFloatTitle)?.text = instance.titleText
@@ -201,10 +205,9 @@ class FloatingWindowService : Service() {
         wireManualInstanceButtons(instance, view)
         makeDraggable(view.findViewById(R.id.floatManualHeader), view, params)
         
-        val resizeRight = view.findViewById<View>(R.id.resizeRight)
-        val resizeLeft = view.findViewById<View>(R.id.resizeLeft)
-        if (resizeRight != null && resizeLeft != null) {
-            attachManualResizeHandles(resizeRight, resizeLeft, view, params)
+        val resizeBottom = view.findViewById<View>(R.id.resizeBottom)
+        if (resizeBottom != null) {
+            attachManualResizeHandles(resizeBottom, view, params)
         }
         
         wm.addView(view, params)
@@ -1050,14 +1053,14 @@ class FloatingWindowService : Service() {
      * Minimum: 240 × 330 dp  |  Maximum: 90 % of screen dimensions.
      */
     private fun attachManualResizeHandles(
-        handleRight: View,
-        handleLeft: View,
+        handleBottom: View,
         root: View,
         params: LayoutParams
     ) {
         val minW = dpToPx(180); val minH = dpToPx(240)
         var startW = 0; var startH = 0; var startX = 0
         var startRx = 0f; var startRy = 0f
+        var resizeMode = 0 // 0=height only, 1=right edge, 2=left edge
 
         val screenW: Int; val screenH: Int
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
@@ -1071,39 +1074,38 @@ class FloatingWindowService : Service() {
         }
         val maxW = (screenW * 0.9).toInt(); val maxH = (screenH * 0.9).toInt()
 
-        handleRight.setOnTouchListener { _, ev ->
+        handleBottom.setOnTouchListener { v, ev ->
             when (ev.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    startW  = params.width.takeIf { it > 0 } ?: root.width
-                    startH  = params.height.takeIf { it > 0 } ?: root.height
-                    startRx = ev.rawX; startRy = ev.rawY; true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val newW = (startW + (ev.rawX - startRx).toInt()).coerceIn(minW, maxW)
-                    val newH = (startH + (ev.rawY - startRy).toInt()).coerceIn(minH, maxH)
-                    params.width = newW; params.height = newH
-                    wm.updateViewLayout(root, params); true
-                }
-                else -> false
-            }
-        }
-
-        handleLeft.setOnTouchListener { _, ev ->
-            when (ev.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    startW  = params.width.takeIf { it > 0 } ?: root.width
-                    startH  = params.height.takeIf { it > 0 } ?: root.height
-                    startX  = params.x
-                    startRx = ev.rawX; startRy = ev.rawY; true
+                    startW = params.width.takeIf { it > 0 } ?: root.width
+                    startH = params.height.takeIf { it > 0 } ?: root.height
+                    startX = params.x
+                    startRx = ev.rawX; startRy = ev.rawY
+                    // Determine resize mode from touch X position on the handle
+                    val handleW = v.width.takeIf { it > 0 } ?: startW
+                    resizeMode = when {
+                        ev.x > handleW * 0.7f -> 1  // right 30% → resize right edge
+                        ev.x < handleW * 0.3f -> 2  // left 30%  → resize left edge
+                        else -> 0                    // middle 40% → height only
+                    }
+                    true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (ev.rawX - startRx).toInt()
-                    val newW = (startW - dx).coerceIn(minW, maxW)
-                    val newH = (startH + (ev.rawY - startRy).toInt()).coerceIn(minH, maxH)
-                    
-                    val actualDx = startW - newW
-                    params.x = startX + actualDx
-                    params.width = newW; params.height = newH
+                    val dy = (ev.rawY - startRy).toInt()
+                    val newH = (startH + dy).coerceIn(minH, maxH)
+                    when (resizeMode) {
+                        1 -> { // right edge: width grows right
+                            val newW = (startW + dx).coerceIn(minW, maxW)
+                            params.width = newW; params.height = newH
+                        }
+                        2 -> { // left edge: width grows left, x shifts
+                            val newW = (startW - dx).coerceIn(minW, maxW)
+                            params.x = startX + (startW - newW)
+                            params.width = newW; params.height = newH
+                        }
+                        else -> params.height = newH // height only
+                    }
                     wm.updateViewLayout(root, params); true
                 }
                 else -> false

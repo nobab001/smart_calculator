@@ -347,21 +347,12 @@
 
     </LinearLayout>
 
-    <!-- Bottom-right invisible resize handle -->
+    <!-- Full-width bottom resize handle -->
     <View
-        android:id="@+id/resizeRight"
-        android:layout_width="18dp"
-        android:layout_height="18dp"
-        android:layout_gravity="bottom|end"
-        android:clickable="true"
-        android:focusable="true" />
-
-    <!-- Bottom-left invisible resize handle -->
-    <View
-        android:id="@+id/resizeLeft"
-        android:layout_width="18dp"
-        android:layout_height="18dp"
-        android:layout_gravity="bottom|start"
+        android:id="@+id/resizeBottom"
+        android:layout_width="match_parent"
+        android:layout_height="16dp"
+        android:layout_gravity="bottom"
         android:clickable="true"
         android:focusable="true" />
 
