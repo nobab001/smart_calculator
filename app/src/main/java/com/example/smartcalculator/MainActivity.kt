@@ -72,6 +72,32 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         applyButtonLayout()
         setupButtonListeners()
+
+        // Configure PasteEditText
+        binding.etExpression.showSoftInputOnFocus = false
+        binding.etExpression.isFocusableInTouchMode = true
+        binding.etExpression.isClickable = true
+        binding.etExpression.setTextIsSelectable(true)
+        binding.etExpression.requestFocus()
+
+        binding.etExpression.onPasteListener = { newText ->
+            if (justPressedEquals) {
+                exprDisplay.clear(); exprCalc.clear()
+                hasDecimalInCurrent = false; justPressedEquals = false
+            }
+            val norm = normalizePastedText(newText)
+            // Map cursor position from full display (history + expr) to exprDisplay only
+            val historyOffset = sessionLines.sumOf { it.length + 1 } // +1 for newline
+            val rawPos = binding.etExpression.selectionStart.coerceAtLeast(0)
+            val pos = (rawPos - historyOffset).coerceIn(0, exprDisplay.length)
+            exprDisplay.insert(pos, norm.first)
+            exprCalc.insert(pos, norm.second)
+            hasDecimalInCurrent = currentNumber().contains('.')
+            refreshAll()
+            val newCursor = rawPos + norm.first.length
+            binding.etExpression.setSelection(newCursor.coerceAtMost(binding.etExpression.length()))
+        }
+
         refreshAll()
         handleSharedText(intent)
         if (intent.getBooleanExtra(EXTRA_EDIT_MODE, false)) enterEditMode()
@@ -135,67 +161,112 @@ class MainActivity : AppCompatActivity() {
     // Input handlers
     // ──────────────────────────────────────────────
 
+    // ── Input handlers ──────────────────────────────────────────────
+
+    private fun normalizePastedText(text: String): Pair<String, String> {
+        val disp = StringBuilder()
+        val calc = StringBuilder()
+        for (c in text) {
+            when (c) {
+                '*', '×' -> {
+                    disp.append("×")
+                    calc.append("*")
+                }
+                '/', '÷' -> {
+                    disp.append("÷")
+                    calc.append("/")
+                }
+                '-', '−' -> {
+                    disp.append("−")
+                    calc.append("-")
+                }
+                else -> {
+                    disp.append(c)
+                    calc.append(c)
+                }
+            }
+        }
+        return Pair(disp.toString(), calc.toString())
+    }
+
+    private fun isOperatorChar(c: Char): Boolean =
+        c == '+' || c == '-' || c == '*' || c == '/' || c == '×' || c == '÷' || c == '−'
+
+    private fun insertTextAtCursor(dispText: String, calcText: String) {
+        val pos = binding.etExpression.selectionStart.coerceAtLeast(0)
+        
+        exprDisplay.insert(pos, dispText)
+        exprCalc.insert(pos, calcText)
+        
+        refreshAll()
+        binding.etExpression.setSelection(pos + dispText.length)
+    }
+
+    private fun deleteTextBeforeCursor() {
+        val pos = binding.etExpression.selectionStart
+        if (pos > 0) {
+            exprDisplay.deleteCharAt(pos - 1)
+            exprCalc.deleteCharAt(pos - 1)
+            refreshAll()
+            binding.etExpression.setSelection(pos - 1)
+        }
+    }
+
+    private fun currentNumberAt(pos: Int): String {
+        val expr = exprDisplay.toString()
+        val before = expr.substring(0, pos)
+        val lastOp = before.indexOfLast { it == '+' || it == '−' || it == '×' || it == '÷' }
+        return if (lastOp < 0) before else before.substring(lastOp + 1)
+    }
+
     private fun onDigitPressed(digit: String) {
         if (justPressedEquals) {
             exprDisplay.clear(); exprCalc.clear()
             hasDecimalInCurrent = false; justPressedEquals = false
         }
-        if (exprCalc.length < 30) {
-            exprDisplay.append(digit)
-            exprCalc.append(digit)
-        }
-        refreshAll()
+        insertTextAtCursor(digit, digit)
     }
 
     private fun onDoubleZeroPressed() {
-        val cur = currentNumber()
-        if (cur.isEmpty() || cur == "0") return
         if (justPressedEquals) {
             exprDisplay.clear(); exprCalc.clear()
             hasDecimalInCurrent = false; justPressedEquals = false
         }
-        if (exprCalc.length < 29) {
-            exprDisplay.append("00"); exprCalc.append("00")
-        }
-        refreshAll()
+        insertTextAtCursor("00", "00")
     }
 
     private fun onDecimalPressed() {
-        if (hasDecimalInCurrent) return
         if (justPressedEquals) {
             exprDisplay.clear(); exprCalc.clear()
             hasDecimalInCurrent = false; justPressedEquals = false
         }
-        if (endsWithOperator() || exprCalc.isEmpty()) {
-            exprDisplay.append("0"); exprCalc.append("0")
-        }
-        exprDisplay.append("."); exprCalc.append(".")
-        hasDecimalInCurrent = true
-        refreshAll()
+        val pos = binding.etExpression.selectionStart.coerceAtLeast(0)
+        val curNum = currentNumberAt(pos)
+        if (curNum.contains('.')) return
+        
+        insertTextAtCursor(".", ".")
     }
 
     private fun onOperatorPressed(operator: String) {
-        // Allow leading minus for negative number entry
-        if (exprCalc.isEmpty() && operator == "−") {
-            exprDisplay.append("−"); exprCalc.append("-")
-            refreshAll(); return
+        if (justPressedEquals) {
+            justPressedEquals = false
         }
-        if (exprCalc.isEmpty()) return
-        if (justPressedEquals) justPressedEquals = false
-        // Replace trailing operator
-        if (endsWithOperator()) {
-            exprDisplay.deleteCharAt(exprDisplay.length - 1)
-            exprCalc.deleteCharAt(exprCalc.length - 1)
+        
+        val pos = binding.etExpression.selectionStart
+        if (pos > 0 && isOperatorChar(exprDisplay[pos - 1])) {
+            exprDisplay.deleteCharAt(pos - 1)
+            exprCalc.deleteCharAt(pos - 1)
+            exprDisplay.insert(pos - 1, operator)
+            exprCalc.insert(pos - 1, toCalcOp(operator))
+            refreshAll()
+            binding.etExpression.setSelection(pos)
+        } else {
+            insertTextAtCursor(operator, toCalcOp(operator))
         }
-        exprDisplay.append(operator)
-        exprCalc.append(toCalcOp(operator))
-        hasDecimalInCurrent = false
-        refreshAll()
     }
 
     private fun onEqualsPressed() {
         if (exprCalc.isEmpty()) return
-        // Strip trailing operator
         if (endsWithOperator()) {
             exprDisplay.deleteCharAt(exprDisplay.length - 1)
             exprCalc.deleteCharAt(exprCalc.length - 1)
@@ -204,7 +275,7 @@ class MainActivity : AppCompatActivity() {
 
         val result = evalExpr(exprCalc.toString())
         if (result.isNaN() || result.isInfinite()) {
-            binding.tvResult.text = "Error"; return
+            binding.tvTotal.text = "= Error"; return
         }
 
         val resultStr = formatResult(result)
@@ -213,13 +284,11 @@ class MainActivity : AppCompatActivity() {
         justPressedEquals = true
         hasDecimalInCurrent = resultStr.contains('.')
 
-        // Set expression to result so user can chain (e.g., press + next)
         exprDisplay.clear(); exprDisplay.append(resultStr)
         exprCalc.clear(); exprCalc.append(resultStr)
         refreshAll()
     }
 
-    /** Clears state without persisting the session (used by backspace-after-equals). */
     private fun clearWithoutSaving() {
         sessionLines.clear()
         exprDisplay.clear(); exprCalc.clear()
@@ -228,7 +297,6 @@ class MainActivity : AppCompatActivity() {
         refreshAll()
     }
 
-    /** AC: save session → clear everything */
     private fun onClearPressed() {
         if (sessionLines.isNotEmpty()) saveSession()
         sessionLines.clear()
@@ -240,11 +308,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun onPercentPressed() {
         if (justPressedEquals) justPressedEquals = false
-        val curNum = currentNumber()
+        val pos = binding.etExpression.selectionStart.coerceAtLeast(0)
+        val curNum = currentNumberAt(pos)
         val num = curNum.toDoubleOrNull() ?: return
 
-        val dispExpr = exprDisplay.toString()
-        val calcExpr = exprCalc.toString()
+        // Compute percentage for this number
+        val dispExpr = exprDisplay.toString().substring(0, pos)
+        val calcExpr = exprCalc.toString().substring(0, pos)
         val lastOpD = dispExpr.indexOfLast { it == '+' || it == '−' || it == '×' || it == '÷' }
         val lastOpC = calcExpr.indexOfLast   { it == '+' || it == '-' || it == '*' || it == '/' }
 
@@ -255,26 +325,18 @@ class MainActivity : AppCompatActivity() {
         } else num / 100.0
 
         val pctStr = formatResult(pctVal)
-        if (lastOpD >= 0) {
-            exprDisplay.clear(); exprDisplay.append(dispExpr.substring(0, lastOpD + 1) + pctStr)
-            exprCalc.clear();    exprCalc.append(calcExpr.substring(0, lastOpC + 1) + pctStr)
-        } else {
-            exprDisplay.clear(); exprDisplay.append(pctStr)
-            exprCalc.clear();    exprCalc.append(pctStr)
-        }
-        hasDecimalInCurrent = pctStr.contains('.')
+        val startOfNum = if (lastOpD >= 0) lastOpD + 1 else 0
+        
+        exprDisplay.replace(startOfNum, pos, pctStr)
+        exprCalc.replace(startOfNum, pos, pctStr)
+        
         refreshAll()
+        binding.etExpression.setSelection(startOfNum + pctStr.length)
     }
 
     private fun onBackspacePressed() {
         if (justPressedEquals) { clearWithoutSaving(); return }
-        if (exprDisplay.isEmpty()) return
-        val removed = exprDisplay.last()
-        exprDisplay.deleteCharAt(exprDisplay.length - 1)
-        exprCalc.deleteCharAt(exprCalc.length - 1)
-        if (removed == '.') hasDecimalInCurrent = false
-        else hasDecimalInCurrent = currentNumber().contains('.')
-        refreshAll()
+        deleteTextBeforeCursor()
     }
 
     // ──────────────────────────────────────────────
@@ -282,56 +344,26 @@ class MainActivity : AppCompatActivity() {
     // ──────────────────────────────────────────────
 
     private fun refreshAll() {
-        refreshZone2Input()
-        refreshZone1History()
+        refreshExpressionDisplay()
         refreshZone3Total()
     }
 
-    /** Zone 2 – large number: current number being typed OR last result. */
-    private fun refreshZone2Input() {
-        val shown = when {
-            justPressedEquals   -> formatResult(sessionTotal)
-            exprDisplay.isEmpty() -> "0"
-            else -> {
-                val cur = currentNumber()
-                if (cur.isEmpty()) "0" else formatNumber(cur)
-            }
+    private fun refreshExpressionDisplay() {
+        // Build display text: session history lines + current expression
+        val sb = StringBuilder()
+        for (line in sessionLines) {
+            sb.appendLine(line)
         }
-        binding.tvResult.text = shown
-        binding.tvResult.textSize = when {
-            shown.length > 12 -> 32f
-            shown.length > 9  -> 42f
-            shown.length > 6  -> 52f
-            else              -> 64f
-        }
-    }
-
-    /**
-     * Zone 1 – history + live expression.
-     * Shows completed session lines above, then the expression currently being typed.
-     */
-    private fun refreshZone1History() {
-        val parts = mutableListOf<String>()
-        parts.addAll(sessionLines)
-        // Show live expression when the user is still building it
-        if (!justPressedEquals && exprDisplay.isNotEmpty()) {
-            parts.add(exprDisplay.toString())
-        }
-        binding.tvHistory.text = parts.joinToString("\n")
-        binding.scrollHistory.post {
-            binding.scrollHistory.fullScroll(ScrollView.FOCUS_DOWN)
-        }
+        sb.append(exprDisplay.toString())
+        val text = sb.toString()
+        binding.etExpression.setText(text)
+        binding.etExpression.setSelection(text.length)
     }
 
     /**
      * Zone 3 – live running total.
      * Evaluates the current expression in real time so the user always sees
      * the up-to-date result while typing, without needing to press =.
-     *
-     * Logic:
-     *  • justPressedEquals → show the exact = result (sessionTotal)
-     *  • Typing   → strip any trailing operator, then eval the expression live
-     *  • Empty    → show 0
      */
     private fun refreshZone3Total() {
         val display: String = when {
@@ -378,14 +410,10 @@ class MainActivity : AppCompatActivity() {
         return c == '+' || c == '-' || c == '*' || c == '/'
     }
 
-    private fun toCalcOp(displayOp: String): String = when (displayOp) {
-        "×" -> "*"; "÷" -> "/"; "−" -> "-"; else -> displayOp
-    }
+    private fun toCalcOp(displayOp: String): String = CalculatorEngine.toCalcOp(displayOp)
 
     /** Evaluate a math expression string using exp4j (BODMAS/PEMDAS). */
-    private fun evalExpr(expr: String): Double = try {
-        ExpressionBuilder(expr).build().evaluate()
-    } catch (_: Exception) { Double.NaN }
+    private fun evalExpr(expr: String): Double = CalculatorEngine.eval(expr)
 
     // ──────────────────────────────────────────────
     // Session persistence (saved on AC press)
@@ -413,24 +441,9 @@ class MainActivity : AppCompatActivity() {
     // Formatting
     // ──────────────────────────────────────────────
 
-    private fun formatResult(value: Double): String {
-        if (value.isNaN() || value.isInfinite()) return "Error"
-        val bd = BigDecimal(value).setScale(10, RoundingMode.HALF_UP).stripTrailingZeros()
-        val plain = bd.toPlainString()
-        return if (plain.contains('.') && plain.length > 12)
-            BigDecimal(value).setScale(6, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
-        else plain
-    }
+    private fun formatResult(value: Double): String = CalculatorEngine.formatResult(value)
 
-    private fun formatNumber(input: String): String {
-        if (input.isEmpty()) return "0"
-        if (input == "-" || input.endsWith(".")) return input
-        return try {
-            val parts   = input.split(".")
-            val intPart = parts[0].toLongOrNull()?.let { "%,d".format(it) } ?: parts[0]
-            if (parts.size > 1) "$intPart.${parts[1]}" else intPart
-        } catch (_: Exception) { input }
-    }
+    private fun formatNumber(input: String): String = CalculatorEngine.formatNumber(input)
 
     // ──────────────────────────────────────────────
     // Floating mode

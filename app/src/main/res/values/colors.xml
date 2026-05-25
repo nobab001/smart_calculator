@@ -18,6 +18,7 @@
     <!-- Text – light -->
     <color name="text_primary">#FF1C1C1E</color>
     <color name="text_secondary">#FF8E8E93</color>
+    <color name="text_faded_expression">#801C1C1E</color>
     <color name="text_operator">#FFFFFFFF</color>
     <color name="text_function">#FF1C1C1E</color>
 

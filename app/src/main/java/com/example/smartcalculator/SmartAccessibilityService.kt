@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -42,14 +44,14 @@ class SmartAccessibilityService : AccessibilityService() {
             """0\d{1,4}[\s\-]\d{4,8}(?:[\s\-]\d{2,6})?"""
         )
 
-        private val NUMBER_REGEX = Regex("""[0-9.]+""")
+        private val NUMBER_REGEX = Regex("""[0-9০-৯.]+""")
 
-        private const val MAX_DIGITS_PER_TOKEN = 4
+        private const val MAX_DIGITS_PER_TOKEN = 9
 
-        private const val NODE_CAPTURE_GUARD_MS = 200L
+        private const val NODE_CAPTURE_GUARD_MS = 100L
         private const val CONTENT_DEEP_SCAN_MIN_INTERVAL_MS = 120L
         /** Block identical value commits within this window to absorb duplicates from sibling nodes. */
-        private const val SAME_VALUE_GUARD_MS = 500L
+        private const val SAME_VALUE_GUARD_MS = 200L
         /** Suppress click-triggered capture for this long after a scroll, to avoid false imports. */
         private const val POST_SCROLL_SUPPRESS_MS = 400L
         private const val VIBRATE_MS = 50L
@@ -80,15 +82,24 @@ class SmartAccessibilityService : AccessibilityService() {
     private var lastCommitValue: Double = Double.NaN
     private var lastCommitMs: Long = 0L
     private var lastScrollMs: Long = 0L
+    private val handler = Handler(Looper.getMainLooper())
 
     private val clearReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
-            if (intent.action == FloatingWindowService.ACTION_CLEAR_SMART) {
-                resetSelectionModeState()
-                lastSelectedKeys.clear()
-                lastCaptureAtByKey.clear()
-                lastCommitValue = Double.NaN
-                lastCommitMs = 0L
+            when (intent.action) {
+                FloatingWindowService.ACTION_CLEAR_SMART -> {
+                    resetSelectionModeState()
+                    lastSelectedKeys.clear()
+                    lastCaptureAtByKey.clear()
+                    lastCommitValue = Double.NaN
+                    lastCommitMs = 0L
+                }
+                FloatingWindowService.ACTION_UNDO_SMART -> {
+                    if (committedSelectionTuples.isNotEmpty()) {
+                        val lastElement = committedSelectionTuples.last()
+                        committedSelectionTuples.remove(lastElement)
+                    }
+                }
             }
         }
     }
@@ -102,7 +113,10 @@ class SmartAccessibilityService : AccessibilityService() {
     }
 
     override fun onServiceConnected() {
-        val filter = IntentFilter(FloatingWindowService.ACTION_CLEAR_SMART)
+        val filter = IntentFilter().apply {
+            addAction(FloatingWindowService.ACTION_CLEAR_SMART)
+            addAction(FloatingWindowService.ACTION_UNDO_SMART)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             registerReceiver(clearReceiver, filter, RECEIVER_NOT_EXPORTED)
         else
@@ -170,9 +184,24 @@ class SmartAccessibilityService : AccessibilityService() {
                     if (root != null) {
                         try {
                             if (isSelectionMode && !rootShowsSelectionActionChrome(root)) {
-                                resetSelectionModeState()
-                                lastSelectedKeys.clear()
-                                lastCaptureAtByKey.clear()
+                                handler.postDelayed({
+                                    val delayedRoot = rootInActiveWindow
+                                    if (delayedRoot != null) {
+                                        try {
+                                            if (isSelectionMode && !rootShowsSelectionActionChrome(delayedRoot)) {
+                                                resetSelectionModeState()
+                                                lastSelectedKeys.clear()
+                                                lastCaptureAtByKey.clear()
+                                            }
+                                        } finally {
+                                            delayedRoot.recycle()
+                                        }
+                                    } else {
+                                        resetSelectionModeState()
+                                        lastSelectedKeys.clear()
+                                        lastCaptureAtByKey.clear()
+                                    }
+                                }, 250L)
                             }
                         } finally {
                             root.recycle()
@@ -183,12 +212,7 @@ class SmartAccessibilityService : AccessibilityService() {
             }
 
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-                if (pkg !in WHATSAPP_PACKAGES) return
-                if (!isSelectionMode) return
-                val now = System.currentTimeMillis()
-                if (now - lastContentDeepScanMs < CONTENT_DEEP_SCAN_MIN_INTERVAL_MS) return
-                lastContentDeepScanMs = now
-                deepScanSelectedNodesAndCapture(pkg)
+                // Action-driven capture is handled in click/long-click events; ignore content updates to prevent scroll-capture.
             }
 
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
@@ -196,10 +220,10 @@ class SmartAccessibilityService : AccessibilityService() {
             }
 
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
-                if (pkg !in WHATSAPP_PACKAGES) return
+                // Capture highlighted/selected text from ANY app
+                val now = System.currentTimeMillis()
+                if (now - lastScrollMs < 800L) return
                 // Only capture when the user has actually highlighted text (non-empty range).
-                // Do NOT arm isSelectionMode here — that is handled by TYPE_VIEW_LONG_CLICKED.
-                // This event fires spuriously during scroll as TextViews reset their cursor.
                 val src = event.source ?: return
                 try {
                     val selected = extractSelectedText(src)
@@ -213,7 +237,7 @@ class SmartAccessibilityService : AccessibilityService() {
             }
 
             AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> {
-                if (pkg !in WHATSAPP_PACKAGES) return
+                // Long press on ANY app enters selection mode (WhatsApp-style multi-select)
                 val src = event.source ?: return
                 try {
                     if (isActionModeCloseButton(src)) {
@@ -222,21 +246,15 @@ class SmartAccessibilityService : AccessibilityService() {
                         lastCaptureAtByKey.clear()
                         return
                     }
-                    // Long-press enters WhatsApp bubble multi-select — arm selection mode so
-                    // subsequent TYPE_WINDOW_CONTENT_CHANGED events trigger the deep scan.
                     isSelectionMode = true
-                    val now = System.currentTimeMillis()
-                    if (now - lastContentDeepScanMs >= CONTENT_DEEP_SCAN_MIN_INTERVAL_MS) {
-                        lastContentDeepScanMs = now
-                        deepScanSelectedNodesAndCapture(pkg)
-                    }
+                    processClickOrLongClickInSelectionMode(src, pkg)
                 } finally {
                     src.recycle()
                 }
             }
 
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
-                if (pkg !in WHATSAPP_PACKAGES) return
+                // In selection mode, single click adds items from ANY app
                 val src = event.source ?: return
                 var recycleSrc = true
                 try {
@@ -247,16 +265,10 @@ class SmartAccessibilityService : AccessibilityService() {
                         return
                     }
                     if (isSelectionMode) {
-                        val now = System.currentTimeMillis()
-                        if (now - lastContentDeepScanMs >= CONTENT_DEEP_SCAN_MIN_INTERVAL_MS) {
-                            lastContentDeepScanMs = now
-                            deepScanSelectedNodesAndCapture(pkg)
-                        }
+                        processClickOrLongClickInSelectionMode(src, pkg)
                     } else {
-                        // Suppress if the user was scrolling recently — a slow scroll can
-                        // end with a touch that Android misreports as a click.
-                        val now = System.currentTimeMillis()
-                        if (now - lastScrollMs > POST_SCROLL_SUPPRESS_MS) {
+                        // Normal click: only capture from WhatsApp (preserve existing behaviour)
+                        if (pkg in WHATSAPP_PACKAGES) {
                             src.recycle()
                             recycleSrc = false
                             tryCaptureWithActiveScan(event, pkg)
@@ -517,6 +529,22 @@ class SmartAccessibilityService : AccessibilityService() {
                 if (sel.isNotBlank()) return sel
             }
         }
+
+        // If the clicked node is inside a quoted/reply-preview block,
+        // walk up to the parent message container and extract only
+        // the reply text (collectTextFromTextViewsDeep skips quoted children).
+        if (isNodeInsideQuotedBlock(node)) {
+            val msgContainer = walkUpToMessageContainer(node)
+            if (msgContainer != null) {
+                try {
+                    val text = collectTextFromTextViewsDeep(msgContainer)
+                    if (text.isNotBlank()) return text
+                } finally {
+                    msgContainer.recycle()
+                }
+            }
+        }
+
         val fromTv = collectTextFromTextViewsDeep(node)
         if (fromTv.isNotBlank()) return fromTv
         return collectAllText(node)
@@ -641,6 +669,8 @@ class SmartAccessibilityService : AccessibilityService() {
         acc: StringBuilder = StringBuilder()
     ): String {
         if (depth > MAX_COLLECT_DEPTH) return acc.toString().trim()
+        // Skip quoted/reply-preview blocks so only the actual reply text is captured
+        if (depth > 0 && isQuotedPreviewNode(node)) return acc.toString().trim()
         node.text?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let { frag ->
             if (acc.isNotEmpty()) acc.append(' ')
             acc.append(frag)
@@ -659,6 +689,8 @@ class SmartAccessibilityService : AccessibilityService() {
         acc: StringBuilder = StringBuilder()
     ): String {
         if (depth > MAX_COLLECT_DEPTH) return acc.toString().trim()
+        // Skip quoted/reply-preview blocks so only the actual reply text is captured
+        if (depth > 0 && isQuotedPreviewNode(node)) return acc.toString().trim()
         val cls = node.className?.toString()?.lowercase().orEmpty()
         if (cls.contains("textview")) {
             node.text?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let { frag ->
@@ -674,6 +706,85 @@ class SmartAccessibilityService : AccessibilityService() {
         return acc.toString().trim()
     }
 
+    /**
+     * Returns true if the node is a WhatsApp quoted/reply-preview container.
+     * These nodes typically have viewIdResourceName containing 'quoted' or 'reply_preview'.
+     * We skip these to avoid mixing quoted message text with the actual reply text.
+     */
+    private fun isQuotedPreviewNode(node: AccessibilityNodeInfo): Boolean {
+        val id = node.viewIdResourceName?.lowercase().orEmpty()
+        return id.contains("quoted") || id.contains("reply_preview") ||
+               id.contains("quote_layout") || id.contains("quoted_message")
+    }
+
+    /**
+     * Checks whether [node] itself is a quoted-preview node,
+     * or is nested inside one.
+     */
+    private fun isNodeInsideQuotedBlock(node: AccessibilityNodeInfo): Boolean {
+        if (isQuotedPreviewNode(node)) return true
+        val ancestors = mutableListOf<AccessibilityNodeInfo>()
+        var n: AccessibilityNodeInfo? = node.parent
+        var found = false
+        while (n != null && ancestors.size < 8) {
+            ancestors.add(n)
+            if (isQuotedPreviewNode(n)) { found = true; break }
+            n = n.parent
+        }
+        for (a in ancestors) a.recycle()
+        return found
+    }
+
+    /**
+     * Walks up from [node] past quoted-preview ancestors and returns the first
+     * non-quoted ancestor (the message container). This lets
+     * [collectTextFromTextViewsDeep] skip the quoted children and extract
+     * only the reply text. Caller must recycle the returned node.
+     */
+    private fun walkUpToMessageContainer(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val chain = mutableListOf<AccessibilityNodeInfo>()
+        var n: AccessibilityNodeInfo? = node.parent
+        var d = 0
+        var lastQuoteIdx = -1
+        while (n != null && d < MAX_ANCESTOR_WALK) {
+            chain.add(n)
+            if (isQuotedPreviewNode(n)) lastQuoteIdx = chain.size - 1
+            n = n.parent
+            d++
+        }
+        // The message container is the node right after the last quoted ancestor
+        val resultIdx = if (lastQuoteIdx >= 0 && lastQuoteIdx + 1 < chain.size)
+            lastQuoteIdx + 1 else -1
+        var result: AccessibilityNodeInfo? = null
+        for (i in chain.indices) {
+            if (i == resultIdx) {
+                result = chain[i] // caller will recycle
+            } else {
+                chain[i].recycle()
+            }
+        }
+        return result
+    }
+
+    /** Converts Bengali digits (০-৯) to ASCII digits (0-9). */
+    private fun convertBengaliToEnglishDigits(input: String): String = buildString(input.length) {
+        for (c in input) {
+            when (c) {
+                '০' -> append('0')
+                '১' -> append('1')
+                '২' -> append('2')
+                '৩' -> append('3')
+                '৪' -> append('4')
+                '৫' -> append('5')
+                '৬' -> append('6')
+                '৭' -> append('7')
+                '৮' -> append('8')
+                '৯' -> append('9')
+                else -> append(c)
+            }
+        }
+    }
+
     private fun extractSelectedText(node: AccessibilityNodeInfo): String {
         val text  = node.text?.toString() ?: return ""
         val start = node.textSelectionStart
@@ -683,14 +794,16 @@ class SmartAccessibilityService : AccessibilityService() {
     }
 
     private fun parseNumericValue(raw: String): Double? {
-        val sanitized = raw
+        // Convert Bengali digits to English first, then sanitize
+        val withEnglishDigits = convertBengaliToEnglishDigits(raw)
+        val sanitized = withEnglishDigits
             .replace(TIME_REGEX, " ")
             .replace(FORMATTED_PHONE_REGEX, " ")
             .replace(",", "")
             .trim()
         if (sanitized.isBlank()) return null
         val candidates = NUMBER_REGEX.findAll(sanitized).mapNotNull { m ->
-            val token = m.value
+            val token = convertBengaliToEnglishDigits(m.value)
             val digits = token.count { it.isDigit() }
             if (digits == 0 || digits > MAX_DIGITS_PER_TOKEN) null
             else token.toDoubleOrNull()
@@ -698,4 +811,157 @@ class SmartAccessibilityService : AccessibilityService() {
         val value = candidates.lastOrNull() ?: return null
         return if (value.isFinite()) value else null
     }
+
+    private fun findMessageContainer(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var n: AccessibilityNodeInfo? = node
+        var d = 0
+        while (n != null && d < MAX_ANCESTOR_WALK) {
+            val id = n.viewIdResourceName?.lowercase().orEmpty()
+            if (isMessageAnchorId(id)) {
+                return AccessibilityNodeInfo.obtain(n)
+            }
+            val parent = n.parent
+            if (n != node) n.recycle()
+            n = parent
+            d++
+        }
+        n?.recycle()
+        return null
+    }
+
+    private fun getMessageTextAndValue(node: AccessibilityNodeInfo): Pair<String, Double>? {
+        val container = findMessageContainer(node) ?: return null
+        try {
+            val text = collectTextFromTextViewsDeep(container).trim()
+            if (text.isBlank()) return null
+            val value = parseNumericValue(text) ?: return null
+            return Pair(text, value)
+        } finally {
+            container.recycle()
+        }
+    }
+
+    private fun isNodeOrFamilySelected(node: AccessibilityNodeInfo): Boolean {
+        if (try { node.isSelected || node.isChecked } catch (_: Exception) { false }) {
+            return true
+        }
+        var parent = node.parent
+        var d = 0
+        while (parent != null && d < MAX_ANCESTOR_WALK) {
+            if (try { parent.isSelected || parent.isChecked } catch (_: Exception) { false }) {
+                parent.recycle()
+                return true
+            }
+            val p = parent.parent
+            parent.recycle()
+            parent = p
+            d++
+        }
+        parent?.recycle()
+        return false
+    }
+
+    private fun isNodeWithTextSelected(targetText: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        var isSelected = false
+        fun dfs(n: AccessibilityNodeInfo, d: Int) {
+            if (isSelected || d > MAX_ROOT_SCAN_DEPTH) return
+            val text = collectTextFromTextViewsDeep(n).trim()
+            if (text == targetText) {
+                if (isNodeOrFamilySelected(n)) {
+                    isSelected = true
+                    return
+                }
+            }
+            val cc = n.childCount
+            for (i in 0 until cc) {
+                val ch = n.getChild(i) ?: continue
+                dfs(ch, d + 1)
+                ch.recycle()
+            }
+        }
+        try {
+            dfs(root, 0)
+        } finally {
+            root.recycle()
+        }
+        return isSelected
+    }
+
+    private fun findNodeByPhysicalKey(root: AccessibilityNodeInfo, targetKey: String): AccessibilityNodeInfo? {
+        var found: AccessibilityNodeInfo? = null
+        fun dfs(n: AccessibilityNodeInfo, d: Int) {
+            if (found != null || d > MAX_ROOT_SCAN_DEPTH) return
+            if (physicalKey(n) == targetKey) {
+                found = AccessibilityNodeInfo.obtain(n)
+                return
+            }
+            val cc = n.childCount
+            for (i in 0 until cc) {
+                val ch = n.getChild(i) ?: continue
+                dfs(ch, d + 1)
+                ch.recycle()
+            }
+        }
+        dfs(root, 0)
+        return found
+    }
+
+    private fun processClickOrLongClickInSelectionMode(node: AccessibilityNodeInfo, pkg: String) {
+        if (pkg in WHATSAPP_PACKAGES) {
+            val container = findMessageContainer(node) ?: return
+            val key = physicalKey(container)
+            val pair = getMessageTextAndValue(node)
+            if (pair == null) {
+                container.recycle()
+                return
+            }
+            val text = pair.first
+            val value = pair.second
+            container.recycle()
+
+            handler.postDelayed({
+                if (!isSelectionMode) return@postDelayed
+                val root = rootInActiveWindow
+                if (root != null) {
+                    try {
+                        val foundNode = findNodeByPhysicalKey(root, key)
+                        if (foundNode != null) {
+                            try {
+                                if (isNodeOrFamilySelected(foundNode)) {
+                                    val tuple = selectionTuple(text, value)
+                                    if (tuple !in committedSelectionTuples) {
+                                        committedSelectionTuples.add(tuple)
+                                        commitCapture(value, pkg)
+                                    }
+                                } else {
+                                    val tuple = selectionTuple(text, value)
+                                    if (tuple in committedSelectionTuples) {
+                                        committedSelectionTuples.remove(tuple)
+                                        HistoryManager.removeEntry(value)
+                                    }
+                                }
+                            } finally {
+                                foundNode.recycle()
+                            }
+                        }
+                    } finally {
+                        root.recycle()
+                    }
+                }
+            }, 150L)
+        } else {
+            // Other apps: capture numeric value directly from the clicked node text
+            val raw = collectAllText(node).trim()
+            if (raw.isBlank()) return
+            val value = parseNumericValue(raw) ?: return
+            val key = physicalKey(node)
+            val tuple = selectionTuple(key, value)
+            if (tuple !in committedSelectionTuples) {
+                committedSelectionTuples.add(tuple)
+                commitCapture(value, pkg)
+            }
+        }
+    }
 }
+

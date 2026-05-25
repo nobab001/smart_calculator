@@ -1,265 +1,293 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Smart Mode Floating Window ~200 × 220dp
-    Top bar : [History icon] [drag title] [−] [×]
-    Display : Running total (large)
-    Action  : Copy / Share / Clear button
-    History : Expandable panel (hidden by default)
+    Smart Mode Floating Window ~210 × 220dp
+    Root = FrameLayout to allow resizing handles in bottom corners.
+    Inner LinearLayout = content card.
 -->
-<LinearLayout
+<FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:id="@+id/smartRoot"
-    android:layout_width="210dp"
-    android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:background="@drawable/bg_float_window"
-    android:clipToOutline="true">
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
 
-    <!-- ── Title bar (drag handle) ── -->
     <LinearLayout
-        android:id="@+id/smartHeader"
+        android:id="@+id/smartFloatContent"
         android:layout_width="match_parent"
-        android:layout_height="44dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingHorizontal="8dp"
-        android:background="@color/bg_float_header">
-
-        <ImageButton
-            android:id="@+id/btnSmartHistory"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:src="@drawable/ic_history"
-            android:background="@drawable/bg_icon_btn"
-            android:contentDescription="History"
-            android:padding="7dp"/>
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Smart Calc"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:gravity="center"
-            android:fontFamily="sans-serif-medium"/>
-
-        <ImageButton
-            android:id="@+id/btnSmartMinimize"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:src="@drawable/ic_minimize"
-            android:background="@drawable/bg_icon_btn"
-            android:contentDescription="Minimize"
-            android:padding="7dp"/>
-
-        <Space android:layout_width="4dp" android:layout_height="1dp"/>
-
-        <ImageButton
-            android:id="@+id/btnSmartClose"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:src="@drawable/ic_close"
-            android:background="@drawable/bg_icon_btn"
-            android:contentDescription="Close"
-            android:clickable="true"
-            android:focusable="true"
-            android:padding="7dp"/>
-    </LinearLayout>
-
-    <!-- ── Expression + Total display ── -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:orientation="vertical"
-        android:gravity="center"
-        android:paddingHorizontal="12dp"
-        android:paddingTop="10dp"
-        android:paddingBottom="8dp">
+        android:background="@drawable/bg_float_window"
+        android:clipToOutline="true">
 
-        <!-- Expression row: "100 + 250 + 30" scrollable horizontally -->
-        <HorizontalScrollView
-            android:id="@+id/scrollSmartExpression"
+        <!-- ── Title bar (drag handle) ── -->
+        <LinearLayout
+            android:id="@+id/smartHeader"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:scrollbars="none"
-            android:overScrollMode="never"
-            android:layout_marginBottom="4dp">
+            android:layout_height="44dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="8dp"
+            android:background="@color/bg_float_header">
+
 
             <TextView
-                android:id="@+id/tvSmartExpression"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Smart Calc"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:fontFamily="sans-serif-medium"/>
+
+            <ImageButton
+                android:id="@+id/btnSmartMinimize"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_minimize"
+                android:background="@drawable/bg_icon_btn"
+                android:contentDescription="Minimize"
+                android:padding="7dp"/>
+
+            <Space android:layout_width="4dp" android:layout_height="1dp"/>
+
+            <ImageButton
+                android:id="@+id/btnSmartClose"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:src="@drawable/ic_close"
+                android:background="@drawable/bg_icon_btn"
+                android:contentDescription="Close"
+                android:clickable="true"
+                android:focusable="true"
+                android:padding="7dp"/>
+        </LinearLayout>
+
+        <!-- ── Expression + Total display ── -->
+        <LinearLayout
+            android:id="@+id/smartDisplayArea"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:paddingHorizontal="12dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="5dp"
+            android:minHeight="120dp">
+
+            <!-- Expression row: scrollable horizontally -->
+            <HorizontalScrollView
+                android:id="@+id/scrollSmartExpression"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:scrollbars="none"
+                android:overScrollMode="never"
+                android:layout_marginBottom="4dp">
+
+                <LinearLayout
+                    android:id="@+id/layoutSmartExpressionItems"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="2dp"/>
+            </HorizontalScrollView>
+
+            <!-- TOTAL label -->
+            <TextView
+                android:id="@+id/tvSmartLabel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="TOTAL"
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp"
+                android:gravity="center"
+                android:letterSpacing="0.15"
+                android:fontFamily="sans-serif-medium"/>
+
+            <!-- Large total number -->
+            <TextView
+                android:id="@+id/tvSmartTotal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="0"
+                android:textColor="@color/text_primary"
+                android:textSize="40sp"
+                android:gravity="center"
+                android:singleLine="true"
+                android:ellipsize="start"
+                android:fontFamily="sans-serif-light"
+                android:includeFontPadding="false"
+                android:layout_marginTop="10dp"/>
+
+            <!-- Item count: "3 selections" -->
+            <TextView
+                android:id="@+id/tvSmartCount"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text=""
-                android:textColor="@color/btn_operator"
-                android:textSize="12sp"
-                android:fontFamily="sans-serif-light"
-                android:singleLine="true"
-                android:paddingHorizontal="2dp"/>
-        </HorizontalScrollView>
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:gravity="center"
+                android:layout_marginTop="2dp"/>
+        </LinearLayout>
 
-        <!-- TOTAL label -->
-        <TextView
-            android:id="@+id/tvSmartLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="TOTAL"
-            android:textColor="@color/text_secondary"
-            android:textSize="10sp"
-            android:gravity="center"
-            android:letterSpacing="0.15"
-            android:fontFamily="sans-serif-medium"/>
-
-        <!-- Large total number -->
-        <TextView
-            android:id="@+id/tvSmartTotal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="0"
-            android:textColor="@color/text_primary"
-            android:textSize="40sp"
-            android:gravity="center"
-            android:singleLine="true"
-            android:ellipsize="start"
-            android:fontFamily="sans-serif-light"
-            android:includeFontPadding="false"/>
-
-        <!-- Item count: "3 selections" -->
-        <TextView
-            android:id="@+id/tvSmartCount"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text=""
-            android:textColor="@color/text_secondary"
-            android:textSize="11sp"
-            android:gravity="center"
-            android:layout_marginTop="2dp"/>
-    </LinearLayout>
-
-    <!-- Divider -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="@color/divider"/>
-
-    <!-- ── Action buttons row ── -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginHorizontal="10dp"
-        android:layout_marginTop="8dp"
-        android:layout_marginBottom="8dp">
-
-        <!-- Undo Last Selection -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnSmartUndo"
-            android:layout_width="0dp"
-            android:layout_height="44dp"
-            android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:text="↩ Undo"
-            android:textSize="12sp"
-            android:textColor="@color/text_primary"
-            app:backgroundTint="@color/btn_function"
-            app:cornerRadius="12dp"
-            android:stateListAnimator="@null"
-            android:elevation="0dp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"/>
-
-        <!-- Copy Result -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnSmartAction"
-            android:layout_width="0dp"
-            android:layout_height="44dp"
-            android:layout_weight="1"
-            android:text="Copy"
-            android:textSize="12sp"
-            android:textColor="@color/text_primary"
-            app:backgroundTint="@color/btn_action"
-            app:cornerRadius="12dp"
-            android:stateListAnimator="@null"
-            android:elevation="0dp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"/>
-
-    </LinearLayout>
-
-    <!-- ── History Panel (hidden by default) ── -->
-    <LinearLayout
-        android:id="@+id/layoutHistoryPanel"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:visibility="gone">
-
-        <!-- History divider -->
+        <!-- Divider -->
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:background="@color/divider"/>
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="HISTORY"
-            android:textColor="@color/text_secondary"
-            android:textSize="10sp"
-            android:letterSpacing="0.15"
-            android:gravity="center"
-            android:paddingTop="8dp"
-            android:fontFamily="sans-serif-medium"/>
-
-        <!-- History entries - dynamically populated -->
+        <!-- ── Action buttons row ── -->
         <LinearLayout
-            android:id="@+id/layoutHistoryItems"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingHorizontal="12dp"
-            android:paddingTop="4dp"/>
-
-        <!-- Divider before total -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginTop="4dp"
-            android:background="@color/btn_operator"/>
-
-        <TextView
-            android:id="@+id/tvHistoryTotal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Total: 0"
-            android:textColor="@color/btn_operator"
-            android:textSize="15sp"
-            android:fontFamily="sans-serif-medium"
-            android:gravity="end"
-            android:paddingHorizontal="12dp"
-            android:paddingTop="4dp"
-            android:paddingBottom="4dp"/>
-
-        <!-- Clear session button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnClearHistory"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:orientation="horizontal"
             android:layout_marginHorizontal="10dp"
-            android:layout_marginTop="4dp"
-            android:layout_marginBottom="10dp"
-            android:text="Clear Session"
-            android:textSize="12sp"
-            android:textColor="@color/text_primary"
-            app:backgroundTint="@color/btn_function"
-            app:cornerRadius="10dp"
-            android:stateListAnimator="@null"
-            android:elevation="0dp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"/>
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp">
 
+            <!-- Undo Last Selection -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSmartUndo"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp"
+                android:text="Undo"
+                android:textSize="12sp"
+                android:textColor="@color/text_primary"
+                app:backgroundTint="@color/btn_function"
+                app:cornerRadius="12dp"
+                android:stateListAnimator="@null"
+                android:elevation="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"/>
+
+            <!-- Copy Result -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSmartAction"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="Copy"
+                android:textSize="12sp"
+                android:textColor="@color/text_primary"
+                app:backgroundTint="@color/btn_action"
+                app:cornerRadius="12dp"
+                android:stateListAnimator="@null"
+                android:elevation="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"/>
+        </LinearLayout>
+
+        <!-- ── History Panel (hidden by default) ── -->
+        <LinearLayout
+            android:id="@+id/layoutHistoryPanel"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1.2"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <!-- History divider -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="HISTORY"
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp"
+                android:letterSpacing="0.15"
+                android:gravity="center"
+                android:paddingTop="8dp"
+                android:fontFamily="sans-serif-medium"/>
+
+            <!-- Scrollable container for history items -->
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:overScrollMode="never"
+                android:scrollbars="vertical">
+                <LinearLayout
+                    android:id="@+id/layoutHistoryItems"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="12dp"
+                    android:paddingTop="4dp"/>
+            </ScrollView>
+
+            <!-- Divider before total -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginHorizontal="12dp"
+                android:layout_marginTop="4dp"
+                android:background="@color/btn_operator"/>
+
+            <TextView
+                android:id="@+id/tvHistoryTotal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Total: 0"
+                android:textColor="@color/btn_operator"
+                android:textSize="15sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="end"
+                android:paddingHorizontal="12dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"/>
+
+            <!-- Clear session button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnClearHistory"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginHorizontal="10dp"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="10dp"
+                android:text="Clear Session"
+                android:textSize="12sp"
+                android:textColor="@color/text_primary"
+                app:backgroundTint="@color/btn_function"
+                app:cornerRadius="10dp"
+                android:stateListAnimator="@null"
+                android:elevation="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"/>
+        </LinearLayout>
     </LinearLayout>
 
-</LinearLayout>
+    <!-- Bottom-right resize handle -->
+    <ImageView
+        android:id="@+id/smartResizeRight"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="bottom|end"
+        android:src="@drawable/ic_resize_corner"
+        android:padding="4dp"
+        android:contentDescription="Resize Right"
+        android:clickable="true"
+        android:focusable="true"/>
+
+    <!-- Bottom-left resize handle -->
+    <ImageView
+        android:id="@+id/smartResizeLeft"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="bottom|start"
+        android:src="@drawable/ic_resize_corner"
+        android:rotation="90"
+        android:scaleX="-1"
+        android:padding="4dp"
+        android:contentDescription="Resize Left"
+        android:clickable="true"
+        android:focusable="true"/>
+
+</FrameLayout>

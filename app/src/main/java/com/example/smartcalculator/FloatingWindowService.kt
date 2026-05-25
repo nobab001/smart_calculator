@@ -50,6 +50,7 @@ class FloatingWindowService : Service() {
         const val ACTION_ADD_NUMBER   = "com.example.smartcalculator.ADD_NUMBER"
         const val ACTION_DOCK         = "com.example.smartcalculator.DOCK"
         const val ACTION_CLEAR_SMART  = "com.example.smartcalculator.CLEAR_SMART"
+        const val ACTION_UNDO_SMART   = "com.example.smartcalculator.UNDO_SMART"
         const val EXTRA_NUMBER        = "extra_number"
         const val EXTRA_SOURCE        = "extra_source"
 
@@ -63,6 +64,8 @@ class FloatingWindowService : Service() {
     private var bubbleView: View? = null
     private var currentMode = ""        // "manual" | "smart" | "bubble"
     private var preMinimiseMode = ""    // mode to restore when bubble is tapped
+    private var bubbleLastX = 0
+    private var bubbleLastY = 300
 
     // ── Manual calc state (exp4j expression engine) ───────────────────────
     private val floatExprDisplay = StringBuilder()   // "10+5×2"  shown to user
@@ -162,7 +165,7 @@ class FloatingWindowService : Service() {
         fun endsWithOp() = floatExprCalc.lastOrNull()
             ?.let { it == '+' || it == '-' || it == '*' || it == '/' } ?: false
 
-        fun toCalcOp(op: String) = when (op) { "×" -> "*"; "÷" -> "/"; "−" -> "-"; else -> op }
+        fun toCalcOp(op: String) = CalculatorEngine.toCalcOp(op)
 
         fun update() {
             if (floatJustEquals) {
@@ -241,9 +244,7 @@ class FloatingWindowService : Service() {
                 floatExprCalc.deleteCharAt(floatExprCalc.length - 1)
             }
             if (floatExprCalc.isEmpty()) return
-            val result = try {
-                ExpressionBuilder(floatExprCalc.toString()).build().evaluate()
-            } catch (_: Exception) { Double.NaN }
+            val result = CalculatorEngine.eval(floatExprCalc.toString())
             if (result.isNaN() || result.isInfinite()) {
                 display.text = "Error"; exprView.text = ""; return
             }
@@ -263,9 +264,9 @@ class FloatingWindowService : Service() {
             val lastOpD = dispExpr.indexOfLast { it == '+' || it == '−' || it == '×' || it == '÷' }
             val lastOpC = calcExpr.indexOfLast  { it == '+' || it == '-' || it == '*' || it == '/' }
             val pctVal: Double = if (lastOpD >= 0) {
-                val base = try { ExpressionBuilder(calcExpr.substring(0, lastOpC)).build().evaluate() }
-                           catch (_: Exception) { 0.0 }
-                if (base.isNaN() || base.isInfinite()) num / 100.0 else base * (num / 100.0)
+                val base = CalculatorEngine.eval(calcExpr.substring(0, lastOpC))
+                val finalBase = if (base.isNaN()) 0.0 else base
+                if (finalBase.isInfinite()) num / 100.0 else finalBase * (num / 100.0)
             } else num / 100.0
             val pctStr = fmtResult(pctVal)
             if (lastOpD >= 0) {
@@ -340,9 +341,16 @@ class FloatingWindowService : Service() {
 
         applyPopupTheme(view, PopupThemeManager.getSmartTheme(this), isManual = false)
 
-        val params = buildParams(210, LayoutParams.WRAP_CONTENT)
+        val params = buildParams(210, 220)
         wireSmartButtons(view)
         makeDraggable(view.findViewById(R.id.smartHeader), view, params)
+
+        val resizeRight = view.findViewById<View>(R.id.smartResizeRight)
+        val resizeLeft = view.findViewById<View>(R.id.smartResizeLeft)
+        if (resizeRight != null && resizeLeft != null) {
+            attachSmartResizeHandles(resizeRight, resizeLeft, view, params)
+        }
+
         wm.addView(view, params)
 
         refreshSmartDisplay()
@@ -353,23 +361,27 @@ class FloatingWindowService : Service() {
         val histItems = v.findViewById<LinearLayout>(R.id.layoutHistoryItems)
         val tvHTotal  = v.findViewById<TextView>(R.id.tvHistoryTotal)
 
-        v.findViewById<ImageButton>(R.id.btnSmartHistory).setOnClickListener {
-            if (histPanel.visibility == View.GONE) {
-                populateHistory(histItems, tvHTotal)
-                histPanel.visibility = View.VISIBLE
-            } else {
-                histPanel.visibility = View.GONE
-            }
-        }
 
-        // Copy: includes the expression + total for context
-        v.findViewById<MaterialButton>(R.id.btnSmartAction).setOnClickListener {
+        // Copy: single click → compact "520+313+375" (paste into any calculator)
+        //        long press   → full  "520 + 313 + 375 = 3643" (human-readable)
+        val btnCopy = v.findViewById<MaterialButton>(R.id.btnSmartAction)
+        btnCopy.setOnClickListener {
+            val text = if (HistoryManager.hasEntries())
+                HistoryManager.calcExpressionString()
+            else
+                HistoryManager.formattedTotal()
+            val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("expr", text))
+            Toast.makeText(this, "Copied: $text", Toast.LENGTH_SHORT).show()
+        }
+        btnCopy.setOnLongClickListener {
             val expr   = HistoryManager.expressionString()
             val result = HistoryManager.formattedTotal()
             val text   = if (HistoryManager.hasEntries()) "$expr = $result" else result
             val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("result", text))
-            Toast.makeText(this, "Copied: $result", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Copied full: $result", Toast.LENGTH_SHORT).show()
+            true
         }
 
         // Undo: removes the last captured selection
@@ -378,11 +390,20 @@ class FloatingWindowService : Service() {
             if (removed == null) {
                 Toast.makeText(this, "Nothing to undo", Toast.LENGTH_SHORT).show()
             } else {
+                sendBroadcast(Intent(ACTION_UNDO_SMART))
                 val fmt = java.math.BigDecimal(removed)
                     .setScale(4, java.math.RoundingMode.HALF_UP)
                     .stripTrailingZeros().toPlainString()
                 Toast.makeText(this, "Removed: $fmt", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        v.findViewById<MaterialButton>(R.id.btnSmartUndo).setOnLongClickListener {
+            HistoryManager.clear()
+            histPanel.visibility = View.GONE
+            sendBroadcast(Intent(ACTION_CLEAR_SMART))
+            Toast.makeText(this, "Session cleared", Toast.LENGTH_SHORT).show()
+            true
         }
 
         v.findViewById<MaterialButton>(R.id.btnClearHistory).setOnClickListener {
@@ -391,6 +412,22 @@ class FloatingWindowService : Service() {
             sendBroadcast(Intent(ACTION_CLEAR_SMART))
             Toast.makeText(this, "Session cleared", Toast.LENGTH_SHORT).show()
         }
+
+        val tvSmartTotal = v.findViewById<TextView>(R.id.tvSmartTotal)
+        val tvSmartCount = v.findViewById<TextView>(R.id.tvSmartCount)
+        val copyTotalAction = {
+            val result = HistoryManager.formattedTotal()
+            val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("result", result))
+            Toast.makeText(this, "Copied total: $result", Toast.LENGTH_SHORT).show()
+        }
+        if (tvSmartTotal != null) {
+            setDoubleClickListener(tvSmartTotal, copyTotalAction)
+        }
+        if (tvSmartCount != null) {
+            setDoubleClickListener(tvSmartCount, copyTotalAction)
+        }
+
 
         v.findViewById<ImageButton>(R.id.btnSmartMinimize).setOnClickListener { dockToBubble() }
         v.findViewById<ImageButton>(R.id.btnSmartClose).setOnClickListener {
@@ -417,12 +454,66 @@ class FloatingWindowService : Service() {
             v.findViewById<TextView>(R.id.tvSmartCount)?.text =
                 if (n == 0) "" else "$n selection${if (n > 1) "s" else ""}"
 
-            // Live expression: "355 + 877 + 98 …"
-            val tvExpr   = v.findViewById<TextView>(R.id.tvSmartExpression)
+            // Per-entry expression items inside HorizontalScrollView
+            val exprContainer = v.findViewById<LinearLayout>(R.id.layoutSmartExpressionItems)
             val scrollExpr = v.findViewById<android.widget.HorizontalScrollView>(R.id.scrollSmartExpression)
-            tvExpr?.text = if (HistoryManager.hasEntries()) HistoryManager.expressionString() else ""
-            // Auto-scroll expression to the right so the newest value is always visible
-            scrollExpr?.post { scrollExpr.fullScroll(android.view.View.FOCUS_RIGHT) }
+            if (exprContainer != null) {
+                exprContainer.removeAllViews()
+                val entries = HistoryManager.entries
+                val isDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+                val exprColor = if (isDark) android.graphics.Color.parseColor("#80FFFFFF") else android.graphics.Color.parseColor("#80000000")
+
+                entries.forEachIndexed { i, entry ->
+                    // Separator " + " before each item except the first
+                    if (i > 0) {
+                        val sep = TextView(this@FloatingWindowService).apply {
+                            text = " + "
+                            textSize = 15f
+                            setTextColor(exprColor)
+                            typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
+                        }
+                        exprContainer.addView(sep)
+                    }
+
+                    // Number token
+                    val numTv = TextView(this@FloatingWindowService).apply {
+                        text = HistoryManager.fmt(entry.value)
+                        textSize = 15f
+                        setTextColor(exprColor)
+                        typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
+                        setPadding(2, 0, 2, 0)
+
+                        // Restore checked state
+                        if (entry.isChecked) {
+                            paintFlags = paintFlags or android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
+                        } else {
+                            paintFlags = paintFlags and android.graphics.Paint.STRIKE_THRU_TEXT_FLAG.inv()
+                        }
+
+                        // Double-click: toggle this entry's strikethrough
+                        setDoubleClickListener(this) {
+                            entry.isChecked = !entry.isChecked
+                            if (entry.isChecked) {
+                                paintFlags = paintFlags or android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
+                            } else {
+                                paintFlags = paintFlags and android.graphics.Paint.STRIKE_THRU_TEXT_FLAG.inv()
+                            }
+                        }
+
+                        // Long-press: mark/unmark ALL entries
+                        setOnLongClickListener {
+                            val allChecked = entries.all { it.isChecked }
+                            entries.forEach { it.isChecked = !allChecked }
+                            refreshSmartDisplay()
+                            true
+                        }
+                    }
+                    exprContainer.addView(numTv)
+                }
+
+                // Auto-scroll to the right so newest value is visible
+                scrollExpr?.post { scrollExpr.fullScroll(android.view.View.FOCUS_RIGHT) }
+            }
 
             // Refresh history panel if it is open
             val histPanel = v.findViewById<LinearLayout>(R.id.layoutHistoryPanel)
@@ -455,17 +546,39 @@ class FloatingWindowService : Service() {
     private fun populateHistory(container: LinearLayout, tvTotal: TextView) {
         container.removeAllViews()
         val entries = HistoryManager.entries
+        val isDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        // Translucent faded colors: 50% opacity white in dark, 50% opacity black in light
+        val textColor = if (isDark) Color.parseColor("#80FFFFFF") else Color.parseColor("#80000000")
+        
         entries.forEachIndexed { i, entry ->
             val row = TextView(this).apply {
                 text = if (i == 0) HistoryManager.fmt(entry.value)
                        else "+ ${HistoryManager.fmt(entry.value)}"
                 textSize   = 14f
-                setTextColor(resources.getColor(R.color.text_primary, null))
+                setTextColor(textColor)
                 setPadding(0, 4, 0, 4)
+
+                // Restore checked/strikethrough state
+                if (entry.isChecked) {
+                    paintFlags = paintFlags or android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
+                } else {
+                    paintFlags = paintFlags and android.graphics.Paint.STRIKE_THRU_TEXT_FLAG.inv()
+                }
+
+                // Toggle checked state on double click
+                setDoubleClickListener(this) {
+                    entry.isChecked = !entry.isChecked
+                    if (entry.isChecked) {
+                        paintFlags = paintFlags or android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
+                    } else {
+                        paintFlags = paintFlags and android.graphics.Paint.STRIKE_THRU_TEXT_FLAG.inv()
+                    }
+                }
             }
             container.addView(row)
         }
         tvTotal.text = "Total: ${HistoryManager.formattedTotal()}"
+        tvTotal.setTextColor(Color.parseColor("#FFFF9F0A"))
     }
 
     // ─────────────────────────────────────────────
@@ -481,10 +594,10 @@ class FloatingWindowService : Service() {
         val view = inflate(R.layout.layout_floating_bubble)
         bubbleView = view
 
-        val sizePx = dpToPx(20)
-        val params = buildParams(sizePx, sizePx).apply {
+        val params = buildParams(24, 24).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 0; y = 300
+            x = bubbleLastX
+            y = bubbleLastY
         }
 
         var initX = 0; var initY = 0; var initRx = 0f; var initRy = 0f; var moved = false
@@ -505,6 +618,8 @@ class FloatingWindowService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!moved) {
+                        bubbleLastX = params.x
+                        bubbleLastY = params.y
                         removeBubble()
                         if (preMinimiseMode == "smart") showSmart() else showManual()
                     } else {
@@ -525,8 +640,10 @@ class FloatingWindowService : Service() {
             wm.currentWindowMetrics.bounds.width()
         else
             @Suppress("DEPRECATION") wm.defaultDisplay.width
-        params.x = if (params.x + dpToPx(10) < screenW / 2) 0 else screenW - dpToPx(20)
+        params.x = if (params.x + dpToPx(12) < screenW / 2) 0 else screenW - dpToPx(24)
         wm.updateViewLayout(bv, params)
+        bubbleLastX = params.x
+        bubbleLastY = params.y
     }
 
     // ─────────────────────────────────────────────
@@ -591,6 +708,79 @@ class FloatingWindowService : Service() {
         }
     }
 
+    private fun setDoubleClickListener(view: View, onDoubleClicked: () -> Unit) {
+        var lastClickTime = 0L
+        view.setOnClickListener {
+            val clickTime = System.currentTimeMillis()
+            if (clickTime - lastClickTime < 300L) {
+                onDoubleClicked()
+            }
+            lastClickTime = clickTime
+        }
+    }
+
+    private fun attachSmartResizeHandles(
+        handleRight: View,
+        handleLeft: View,
+        root: View,
+        params: LayoutParams
+    ) {
+        val minW = dpToPx(180); val minH = dpToPx(225)
+        var startW = 0; var startH = 0; var startX = 0
+        var startRx = 0f; var startRy = 0f
+
+        val screenW: Int; val screenH: Int
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            val bounds = wm.currentWindowMetrics.bounds
+            screenW = bounds.width(); screenH = bounds.height()
+        } else {
+            @Suppress("DEPRECATION")
+            screenW = wm.defaultDisplay.width
+            @Suppress("DEPRECATION")
+            screenH = wm.defaultDisplay.height
+        }
+        val maxW = (screenW * 0.95).toInt(); val maxH = (screenH * 0.95).toInt()
+
+        handleRight.setOnTouchListener { _, ev ->
+            when (ev.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    startW  = params.width.takeIf { it > 0 } ?: root.width
+                    startH  = params.height.takeIf { it > 0 } ?: root.height
+                    startRx = ev.rawX; startRy = ev.rawY; true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val newW = (startW + (ev.rawX - startRx).toInt()).coerceIn(minW, maxW)
+                    val newH = (startH + (ev.rawY - startRy).toInt()).coerceIn(minH, maxH)
+                    params.width = newW; params.height = newH
+                    wm.updateViewLayout(root, params); true
+                }
+                else -> false
+            }
+        }
+
+        handleLeft.setOnTouchListener { _, ev ->
+            when (ev.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    startW  = params.width.takeIf { it > 0 } ?: root.width
+                    startH  = params.height.takeIf { it > 0 } ?: root.height
+                    startX  = params.x
+                    startRx = ev.rawX; startRy = ev.rawY; true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (ev.rawX - startRx).toInt()
+                    val newW = (startW - dx).coerceIn(minW, maxW)
+                    val newH = (startH + (ev.rawY - startRy).toInt()).coerceIn(minH, maxH)
+                    
+                    val actualDx = startW - newW
+                    params.x = startX + actualDx
+                    params.width = newW; params.height = newH
+                    wm.updateViewLayout(root, params); true
+                }
+                else -> false
+            }
+        }
+    }
+
     // ─────────────────────────────────────────────
     // Manual calc logic
     // ─────────────────────────────────────────────
@@ -604,24 +794,9 @@ class FloatingWindowService : Service() {
     // Formatting
     // ─────────────────────────────────────────────
 
-    private fun fmtResult(v: Double): String {
-        if (v.isNaN() || v.isInfinite()) return "Error"
-        val bd = BigDecimal(v).setScale(10, RoundingMode.HALF_UP).stripTrailingZeros()
-        val plain = bd.toPlainString()
-        return if (plain.contains('.') && plain.length > 12)
-            BigDecimal(v).setScale(6, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
-        else plain
-    }
+    private fun fmtResult(v: Double): String = CalculatorEngine.formatResult(v)
 
-    private fun fmtNum(input: String): String {
-        if (input.isEmpty()) return "0"
-        if (input == "-" || input.endsWith(".")) return input
-        return try {
-            val parts = input.split(".")
-            val intPart = parts[0].toLongOrNull()?.let { "%,d".format(it) } ?: parts[0]
-            if (parts.size > 1) "$intPart.${parts[1]}" else intPart
-        } catch (_: Exception) { input }
-    }
+    private fun fmtNum(input: String): String = CalculatorEngine.formatNumber(input)
 
     // ─────────────────────────────────────────────
     // Utility
@@ -637,35 +812,152 @@ class FloatingWindowService : Service() {
      * Light theme = translucent white background, dark text.
      */
     private fun applyPopupTheme(root: View, theme: Int, isManual: Boolean) {
-        if (theme == PopupThemeManager.DARK) return   // layout already dark by default
+        val isDark = if (!isManual) {
+            // For Smart mode, follow the system's night mode automatically
+            (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        } else {
+            // For Manual mode, follow the manual preference
+            theme == PopupThemeManager.DARK
+        }
 
-        // For Manual mode the root is now a FrameLayout wrapper; apply background to the
-        // inner LinearLayout so clip-to-outline and rounded corners work correctly.
         val contentView: View = if (isManual)
             root.findViewById(R.id.manualFloatContent) ?: root
-        else root
+        else
+            root.findViewById(R.id.smartFloatContent) ?: root
 
-        // Background – translucent white rounded card
-        contentView.background = ContextCompat.getDrawable(this, R.drawable.bg_float_window_light)
-        contentView.clipToOutline = true
+        val headerId = if (isManual) R.id.floatManualHeader else R.id.smartHeader
 
-        val headerId  = if (isManual) R.id.floatManualHeader else R.id.smartHeader
-        val colorPrimary   = Color.parseColor("#1C1C1E")
-        val colorSecondary = Color.parseColor("#8E8E93")
-        val headerBg       = Color.parseColor("#CCEDF1F8")
-        val dividerColor   = Color.parseColor("#22000000")
+        if (isDark) {
+            // Background – translucent dark rounded card
+            contentView.background = ContextCompat.getDrawable(this, R.drawable.bg_float_window)
+            contentView.clipToOutline = true
 
-        // Header background
-        root.findViewById<View>(headerId)?.setBackgroundColor(headerBg)
+            val headerBg = Color.parseColor("#FF2C2C2E")
+            root.findViewById<View>(headerId)?.setBackgroundColor(headerBg)
 
-        // All TextViews inside root – set appropriate text colours
-        setAllTextColors(root, colorPrimary, colorSecondary)
+            val colorPrimary = Color.WHITE
+            val colorSecondary = Color.parseColor("#FF8E8E93")
+            val dividerColor = Color.parseColor("#33FFFFFF")
 
-        // Divider lines
-        setDividerColors(root, dividerColor)
+            // All TextViews inside root – set appropriate text colours
+            setAllTextColors(root, colorPrimary, colorSecondary)
 
-        // Icon tints (ImageButtons in header)
-        tintImageButtons(root, colorSecondary)
+            // Divider lines
+            setDividerColors(root, dividerColor)
+
+            // Icon tints (ImageButtons in header)
+            tintImageButtons(root, colorSecondary)
+
+            if (!isManual) {
+                // Custom text/button colors for Smart mode in Dark
+                // (expression items are colored dynamically in refreshSmartDisplay)
+                root.findViewById<TextView>(R.id.tvSmartLabel)?.setTextColor(colorSecondary)
+                root.findViewById<TextView>(R.id.tvSmartCount)?.setTextColor(colorSecondary)
+
+                root.findViewById<MaterialButton>(R.id.btnSmartUndo)?.apply {
+                    setTextColor(Color.WHITE)
+                    backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FF636366"))
+                }
+                root.findViewById<MaterialButton>(R.id.btnSmartAction)?.apply {
+                    setTextColor(Color.WHITE)
+                    backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FF0A84FF"))
+                }
+                root.findViewById<MaterialButton>(R.id.btnClearHistory)?.apply {
+                    setTextColor(Color.WHITE)
+                    backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FF636366"))
+                }
+            } else {
+                themeManualButtons(root, true)
+            }
+        } else {
+            // Background – translucent white rounded card
+            contentView.background = ContextCompat.getDrawable(this, R.drawable.bg_float_window_light)
+            contentView.clipToOutline = true
+
+            val headerBg = Color.parseColor("#CCEDF1F8")
+            root.findViewById<View>(headerId)?.setBackgroundColor(headerBg)
+
+            val colorPrimary = Color.parseColor("#1C1C1E")
+            val colorSecondary = Color.parseColor("#8E8E93")
+            val dividerColor = Color.parseColor("#22000000")
+
+            // All TextViews inside root – set appropriate text colours
+            setAllTextColors(root, colorPrimary, colorSecondary)
+
+            // Divider lines
+            setDividerColors(root, dividerColor)
+
+            // Icon tints (ImageButtons in header)
+            tintImageButtons(root, colorSecondary)
+
+            if (!isManual) {
+                // Custom text/button colors for Smart mode in Light
+                // (expression items are colored dynamically in refreshSmartDisplay)
+                root.findViewById<TextView>(R.id.tvSmartLabel)?.setTextColor(colorSecondary)
+                root.findViewById<TextView>(R.id.tvSmartCount)?.setTextColor(colorSecondary)
+
+                root.findViewById<MaterialButton>(R.id.btnSmartUndo)?.apply {
+                    setTextColor(colorPrimary)
+                    backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FFD1D1D6"))
+                }
+                root.findViewById<MaterialButton>(R.id.btnSmartAction)?.apply {
+                    setTextColor(Color.WHITE)
+                    backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FF0A84FF"))
+                }
+                root.findViewById<MaterialButton>(R.id.btnClearHistory)?.apply {
+                    setTextColor(colorPrimary)
+                    backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FFD1D1D6"))
+                }
+            } else {
+                themeManualButtons(root, false)
+            }
+        }
+    }
+
+    private fun themeManualButtons(root: View, isDark: Boolean) {
+        val numberIds = listOf(
+            R.id.btnFloat0, R.id.btnFloat1, R.id.btnFloat2, R.id.btnFloat3,
+            R.id.btnFloat4, R.id.btnFloat5, R.id.btnFloat6, R.id.btnFloat7,
+            R.id.btnFloat8, R.id.btnFloat9, R.id.btnFloat00, R.id.btnFloatDecimal
+        )
+        val funcIds = listOf(R.id.btnFloatClear, R.id.btnFloatPercent, R.id.btnFloatBackspace)
+        val opIds = listOf(R.id.btnFloatDivide, R.id.btnFloatMultiply, R.id.btnFloatSubtract, R.id.btnFloatAdd)
+        val eqId = R.id.btnFloatEquals
+
+        val numBg = Color.parseColor(if (isDark) "#FF3A3A3C" else "#FFFFFFFF")
+        val numTxt = if (isDark) Color.WHITE else Color.parseColor("#FF1C1C1E")
+
+        val funcBg = Color.parseColor(if (isDark) "#FF636366" else "#FFD1D1D6")
+        val funcTxt = if (isDark) Color.WHITE else Color.parseColor("#FF1C1C1E")
+
+        val opBg = Color.parseColor(if (isDark) "#FFFF9F0A" else "#FFFF9F0A")
+        val opTxt = Color.WHITE
+
+        val eqBg = Color.parseColor(if (isDark) "#FF30D158" else "#FF30D158")
+        val eqTxt = Color.WHITE
+
+        numberIds.forEach { id ->
+            root.findViewById<MaterialButton>(id)?.apply {
+                backgroundTintList = ColorStateList.valueOf(numBg)
+                setTextColor(numTxt)
+            }
+        }
+        funcIds.forEach { id ->
+            root.findViewById<MaterialButton>(id)?.apply {
+                backgroundTintList = ColorStateList.valueOf(funcBg)
+                setTextColor(funcTxt)
+            }
+        }
+        opIds.forEach { id ->
+            root.findViewById<MaterialButton>(id)?.apply {
+                backgroundTintList = ColorStateList.valueOf(opBg)
+                setTextColor(opTxt)
+            }
+        }
+        root.findViewById<MaterialButton>(eqId)?.apply {
+            backgroundTintList = ColorStateList.valueOf(eqBg)
+            setTextColor(eqTxt)
+        }
     }
 
     private fun setAllTextColors(parent: View, primary: Int, secondary: Int) {

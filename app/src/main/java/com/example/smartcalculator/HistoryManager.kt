@@ -12,7 +12,8 @@ object HistoryManager {
     data class Entry(
         val value: Double,
         val source: String = "",
-        val timestamp: Long = System.currentTimeMillis()
+        val timestamp: Long = System.currentTimeMillis(),
+        var isChecked: Boolean = false
     )
 
     private val _entries = mutableListOf<Entry>()
@@ -34,8 +35,11 @@ object HistoryManager {
     /** Called after clearing — UI and service can hook here to reset their state. */
     var onCleared: (() -> Unit)? = null
 
+    var isExpressionChecked: Boolean = false
+
     fun clear() {
         _entries.clear()
+        isExpressionChecked = false
         onChanged?.invoke()
         onCleared?.invoke()
     }
@@ -48,6 +52,17 @@ object HistoryManager {
         return removed.value
     }
 
+    /** Removes the last entry matching the given value. Returns true if removed. */
+    fun removeEntry(value: Double): Boolean {
+        val index = _entries.indexOfLast { it.value == value }
+        if (index >= 0) {
+            _entries.removeAt(index)
+            onChanged?.invoke()
+            return true
+        }
+        return false
+    }
+
     fun hasEntries() = _entries.isNotEmpty()
 
     /**
@@ -58,9 +73,18 @@ object HistoryManager {
         return _entries.joinToString(" + ") { fmt(it.value) }
     }
 
+    /**
+     * Returns a compact calculator-pasteable expression like "100+250.5+30"
+     * that can be directly pasted into any standard calculator app.
+     */
+    fun calcExpressionString(): String {
+        if (_entries.isEmpty()) return "0"
+        return _entries.joinToString("+") { fmt(it.value) }
+    }
+
     fun formattedTotal(): String = fmt(total)
 
-    private fun fmt(v: Double): String {
+    internal fun fmt(v: Double): String {
         if (v.isNaN() || v.isInfinite()) return "Error"
         val bd = BigDecimal(v).setScale(10, RoundingMode.HALF_UP).stripTrailingZeros()
         val plain = bd.toPlainString()
