@@ -135,7 +135,6 @@ class FloatingWindowService : Service() {
         removeFloat()
         currentMode = "manual"
         preMinimiseMode = "manual"
-        resetCalcState()
 
         val view = inflate(R.layout.layout_floating_manual)
         floatView = view
@@ -157,6 +156,7 @@ class FloatingWindowService : Service() {
     private fun wireManualButtons(v: View) {
         val display  = v.findViewById<TextView>(R.id.tvFloatResult)
         val exprView = v.findViewById<TextView>(R.id.tvFloatExpression)
+        val svExpr   = v.findViewById<android.widget.HorizontalScrollView>(R.id.svFloatExpression)
 
         // ── helpers ──────────────────────────────────────────────────────
 
@@ -218,6 +218,9 @@ class FloatingWindowService : Service() {
                 }
                 exprView.text = if (lastOp >= 0) expr.substring(0, lastOp + 1) else ""
             }
+            svExpr?.post {
+                svExpr.fullScroll(android.view.View.FOCUS_RIGHT)
+            }
         }
 
         // ── input handlers ───────────────────────────────────────────────
@@ -227,7 +230,7 @@ class FloatingWindowService : Service() {
                 floatExprDisplay.clear(); floatExprCalc.clear()
                 floatHasDecimal = false; floatJustEquals = false
             }
-            if (floatExprCalc.length < 30) {
+            if (floatExprCalc.length < 1000) {
                 floatExprDisplay.append(d); floatExprCalc.append(d)
             }
             update()
@@ -310,6 +313,8 @@ class FloatingWindowService : Service() {
                 @Suppress("DEPRECATION") stopForeground(true)
             stopSelf()
         }
+
+        update()
     }
 
     // ─────────────────────────────────────────────

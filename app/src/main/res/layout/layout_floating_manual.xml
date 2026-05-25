@@ -55,7 +55,7 @@
                 android:contentDescription="Minimize"
                 android:padding="6dp"/>
 
-            <Space android:layout_width="6dp" android:layout_height="1dp"/>
+            <Space android:layout_width="2dp" android:layout_height="1dp"/>
 
             <ImageButton
                 android:id="@+id/btnFloatClose"
@@ -79,24 +79,25 @@
             android:paddingTop="4dp"
             android:paddingBottom="0dp">
 
-            <TextView
-                android:id="@+id/tvFloatExpression"
+            <HorizontalScrollView
+                android:id="@+id/svFloatExpression"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="3.5"
-                android:textColor="@color/text_secondary"
-                android:gravity="end|bottom"
-                android:singleLine="true"
-                android:ellipsize="start"
-                android:fontFamily="sans-serif-light"
-                android:autoSizeTextType="uniform"
-                app:autoSizeTextType="uniform"
-                android:autoSizeMinTextSize="10sp"
-                android:autoSizeMaxTextSize="24sp"
-                app:autoSizeMinTextSize="10sp"
-                app:autoSizeMaxTextSize="24sp"
-                android:autoSizeStepGranularity="1sp"
-                app:autoSizeStepGranularity="1sp"/>
+                android:fillViewport="true"
+                android:scrollbars="none"
+                android:overScrollMode="never">
+
+                <TextView
+                    android:id="@+id/tvFloatExpression"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:textColor="@color/text_secondary"
+                    android:gravity="end|bottom"
+                    android:singleLine="true"
+                    android:fontFamily="sans-serif-light"
+                    android:textSize="18sp"/>
+            </HorizontalScrollView>
 
             <TextView
                 android:id="@+id/tvFloatResult"
