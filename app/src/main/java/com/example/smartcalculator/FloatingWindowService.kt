@@ -85,6 +85,11 @@ class FloatingWindowService : Service() {
 
         var bubbleLastX = 80 + (id - 1) * 100
         var bubbleLastY = 300 + (id - 1) * 150
+
+        var widthPx: Int = -1
+        var heightPx: Int = -1
+        var lastX: Int = -1
+        var lastY: Int = -1
     }
 
     // ── Receivers ─────────────────────────────────
@@ -183,11 +188,12 @@ class FloatingWindowService : Service() {
         // Set the title
         view.findViewById<TextView>(R.id.tvFloatTitle)?.text = instance.titleText
 
-        val initialX = 80 + (instance.id - 1) * 60
-        val initialY = 200 + (instance.id - 1) * 80
         val params = buildParams(300, 360).apply {
-            x = initialX
-            y = initialY
+            if (instance.widthPx != -1) width = instance.widthPx
+            if (instance.heightPx != -1) height = instance.heightPx
+            
+            x = if (instance.lastX != -1) instance.lastX else 80 + (instance.id - 1) * 60
+            y = if (instance.lastY != -1) instance.lastY else 200 + (instance.id - 1) * 80
         }
         instance.params = params
 
@@ -220,13 +226,22 @@ class FloatingWindowService : Service() {
         }
     }
 
-    private fun cloneManualInstance() {
+    private fun cloneManualInstance(sourceInstance: ManualInstance) {
         if (manualInstances.size >= 2) {
             Toast.makeText(this, "Maximum 2 calculators allowed", Toast.LENGTH_SHORT).show()
             return
         }
         val newId = if (manualInstances.any { it.id == 1 }) 2 else 1
         val newInstance = ManualInstance(newId)
+        
+        // Copy the size and offset position from sourceInstance
+        sourceInstance.params?.let { p ->
+            newInstance.widthPx = p.width
+            newInstance.heightPx = p.height
+            newInstance.lastX = p.x + dpToPx(30)
+            newInstance.lastY = p.y + dpToPx(30)
+        }
+        
         manualInstances.add(newInstance)
         showManualInstance(newInstance)
     }
@@ -234,23 +249,28 @@ class FloatingWindowService : Service() {
     private fun dockInstanceToBubble(instance: ManualInstance) {
         if (instance.isMinimized) return
         instance.isMinimized = true
+
+        // Save current window size and coordinates before removing float view
+        instance.params?.let { p ->
+            instance.widthPx = p.width
+            instance.heightPx = p.height
+            instance.lastX = p.x
+            instance.lastY = p.y
+        }
+
         removeInstanceFloat(instance)
 
         val view = inflate(R.layout.layout_floating_bubble)
         instance.bubbleView = view
 
-        val params = buildParams(24, 24).apply {
+        val params = buildParams(LayoutParams.WRAP_CONTENT, 24).apply {
             gravity = Gravity.TOP or Gravity.START
             x = instance.bubbleLastX
             y = instance.bubbleLastY
         }
         instance.bubbleParams = params
 
-        view.findViewById<TextView>(R.id.tvBubbleText)?.text = if (instance.titleText.startsWith("Calculator")) {
-            instance.id.toString()
-        } else {
-            instance.titleText.take(1)
-        }
+        view.findViewById<TextView>(R.id.tvBubbleText)?.text = getBubbleText(instance)
 
         var initX = 0; var initY = 0; var initRx = 0f; var initRy = 0f; var moved = false
 
@@ -292,10 +312,50 @@ class FloatingWindowService : Service() {
             wm.currentWindowMetrics.bounds.width()
         else
             @Suppress("DEPRECATION") wm.defaultDisplay.width
-        params.x = if (params.x + dpToPx(12) < screenW / 2) 0 else screenW - dpToPx(24)
+        val bubbleW = if (bv.width > 0) bv.width else dpToPx(24)
+        params.x = if (params.x + bubbleW / 2 < screenW / 2) 0 else screenW - bubbleW
         try { wm.updateViewLayout(bv, params) } catch (_: Exception) {}
         instance.bubbleLastX = params.x
         instance.bubbleLastY = params.y
+    }
+
+    private fun getBubbleText(instance: ManualInstance): String {
+        val calcExpr = instance.floatExprCalc.toString()
+        if (instance.floatJustEquals) {
+            val total = instance.floatExprDisplay.toString().ifEmpty { "0" }
+            return fmtNum(total)
+        }
+
+        val endsWithOp = calcExpr.lastOrNull()?.let { it == '+' || it == '-' || it == '*' || it == '/' } ?: false
+        if (endsWithOp) {
+            var opCount = 0
+            for (i in calcExpr.indices) {
+                val c = calcExpr[i]
+                if (c == '+' || c == '*' || c == '/') {
+                    opCount++
+                } else if (c == '-') {
+                    if (i > 0) {
+                        val prev = calcExpr[i - 1]
+                        if (prev.isDigit() || prev == '.') {
+                            opCount++
+                        }
+                    }
+                }
+            }
+            if (opCount >= 2) {
+                val subExpr = calcExpr.substring(0, calcExpr.length - 1)
+                val result = CalculatorEngine.eval(subExpr)
+                if (!result.isNaN() && !result.isInfinite()) {
+                    return fmtNum(fmtResult(result))
+                }
+            }
+        }
+
+        if (instance.titleText != "Calculator" && !instance.titleText.startsWith("Calculator ")) {
+            return instance.titleText.take(1)
+        }
+
+        return instance.id.toString()
     }
 
     private fun removeInstanceFloat(instance: ManualInstance) {
@@ -484,7 +544,7 @@ class FloatingWindowService : Service() {
         v.findViewById<MaterialButton>(R.id.btnFloatEquals).setOnClickListener    { onEquals() }
 
         v.findViewById<ImageButton>(R.id.btnFloatClone).setOnClickListener {
-            cloneManualInstance()
+            cloneManualInstance(instance)
         }
 
         v.findViewById<ImageButton>(R.id.btnFloatMinimize).setOnClickListener { dockInstanceToBubble(instance) }
@@ -521,20 +581,66 @@ class FloatingWindowService : Service() {
         }
 
         if (tvTitle != null && etTitle != null) {
-            setDoubleClickListener(tvTitle) {
-                tvTitle.visibility = View.GONE
-                etTitle.visibility = View.VISIBLE
-                etTitle.setText(instance.titleText)
-                etTitle.selectAll()
-                etTitle.requestFocus()
+            var initX = 0
+            var initY = 0
+            var initRx = 0f
+            var initRy = 0f
+            var lastClickTime = 0L
+            var isDragging = false
 
-                instance.params?.let { p ->
-                    p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
-                    try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+            tvTitle.setOnTouchListener { _, ev ->
+                when (ev.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        instance.params?.let { p ->
+                            initX = p.x
+                            initY = p.y
+                        }
+                        initRx = ev.rawX
+                        initRy = ev.rawY
+                        isDragging = false
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = ev.rawX - initRx
+                        val dy = ev.rawY - initRy
+                        if (!isDragging && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+                            isDragging = true
+                        }
+                        if (isDragging) {
+                            instance.params?.let { p ->
+                                p.x = initX + dx.toInt()
+                                p.y = initY + dy.toInt()
+                                try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+                            }
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val clickTime = System.currentTimeMillis()
+                        val dx = ev.rawX - initRx
+                        val dy = ev.rawY - initRy
+                        if (Math.abs(dx) <= 8 && Math.abs(dy) <= 8 && !isDragging) {
+                            if (clickTime - lastClickTime < 300L) {
+                                tvTitle.visibility = View.GONE
+                                etTitle.visibility = View.VISIBLE
+                                etTitle.setText(instance.titleText)
+                                etTitle.selectAll()
+                                etTitle.requestFocus()
+
+                                instance.params?.let { p ->
+                                    p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                                    try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+                                }
+
+                                val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                                imm.showSoftInput(etTitle, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                            }
+                            lastClickTime = clickTime
+                        }
+                        true
+                    }
+                    else -> false
                 }
-
-                val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
-                imm.showSoftInput(etTitle, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
             }
 
             etTitle.setOnFocusChangeListener { _, hasFocus ->
