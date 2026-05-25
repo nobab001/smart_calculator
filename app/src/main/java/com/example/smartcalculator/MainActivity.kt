@@ -86,16 +86,11 @@ class MainActivity : AppCompatActivity() {
                 hasDecimalInCurrent = false; justPressedEquals = false
             }
             val norm = normalizePastedText(newText)
-            // Map cursor position from full display (history + expr) to exprDisplay only
-            val historyOffset = sessionLines.sumOf { it.length + 1 } // +1 for newline
-            val rawPos = binding.etExpression.selectionStart.coerceAtLeast(0)
-            val pos = (rawPos - historyOffset).coerceIn(0, exprDisplay.length)
+            val pos = cursorPosInExpr()
             exprDisplay.insert(pos, norm.first)
             exprCalc.insert(pos, norm.second)
             hasDecimalInCurrent = currentNumber().contains('.')
             refreshAll()
-            val newCursor = rawPos + norm.first.length
-            binding.etExpression.setSelection(newCursor.coerceAtMost(binding.etExpression.length()))
         }
 
         refreshAll()
@@ -192,29 +187,42 @@ class MainActivity : AppCompatActivity() {
     private fun isOperatorChar(c: Char): Boolean =
         c == '+' || c == '-' || c == '*' || c == '/' || c == '×' || c == '÷' || c == '−'
 
+    /**
+     * Maps `binding.etExpression.selectionStart` (which indexes the full
+     * `sessionLines + exprDisplay` text shown in the EditText) to a position
+     * within `exprDisplay` only, clamped to its current length. This avoids
+     * `StringIndexOutOfBoundsException` after a session line has been added
+     * (e.g. immediately after pressing `=`).
+     */
+    private fun cursorPosInExpr(): Int {
+        val historyOffset = sessionLines.sumOf { it.length + 1 } // +1 for newline
+        val raw = binding.etExpression.selectionStart.coerceAtLeast(0)
+        return (raw - historyOffset).coerceIn(0, exprDisplay.length)
+    }
+
     private fun insertTextAtCursor(dispText: String, calcText: String) {
-        val pos = binding.etExpression.selectionStart.coerceAtLeast(0)
-        
+        val pos = cursorPosInExpr()
+
         exprDisplay.insert(pos, dispText)
         exprCalc.insert(pos, calcText)
-        
+
         refreshAll()
-        binding.etExpression.setSelection(pos + dispText.length)
+        // After refreshAll the caret is at end-of-text; nothing extra to do.
     }
 
     private fun deleteTextBeforeCursor() {
-        val pos = binding.etExpression.selectionStart
-        if (pos > 0) {
+        val pos = cursorPosInExpr()
+        if (pos > 0 && pos <= exprDisplay.length) {
             exprDisplay.deleteCharAt(pos - 1)
             exprCalc.deleteCharAt(pos - 1)
             refreshAll()
-            binding.etExpression.setSelection(pos - 1)
         }
     }
 
     private fun currentNumberAt(pos: Int): String {
+        val safePos = pos.coerceIn(0, exprDisplay.length)
         val expr = exprDisplay.toString()
-        val before = expr.substring(0, pos)
+        val before = expr.substring(0, safePos)
         val lastOp = before.indexOfLast { it == '+' || it == '−' || it == '×' || it == '÷' }
         return if (lastOp < 0) before else before.substring(lastOp + 1)
     }
@@ -240,10 +248,10 @@ class MainActivity : AppCompatActivity() {
             exprDisplay.clear(); exprCalc.clear()
             hasDecimalInCurrent = false; justPressedEquals = false
         }
-        val pos = binding.etExpression.selectionStart.coerceAtLeast(0)
+        val pos = cursorPosInExpr()
         val curNum = currentNumberAt(pos)
         if (curNum.contains('.')) return
-        
+
         insertTextAtCursor(".", ".")
     }
 
@@ -251,15 +259,15 @@ class MainActivity : AppCompatActivity() {
         if (justPressedEquals) {
             justPressedEquals = false
         }
-        
-        val pos = binding.etExpression.selectionStart
-        if (pos > 0 && isOperatorChar(exprDisplay[pos - 1])) {
+
+        val pos = cursorPosInExpr()
+        if (pos in 1..exprDisplay.length && isOperatorChar(exprDisplay[pos - 1])) {
+            // Replace the operator immediately before the cursor.
             exprDisplay.deleteCharAt(pos - 1)
             exprCalc.deleteCharAt(pos - 1)
             exprDisplay.insert(pos - 1, operator)
             exprCalc.insert(pos - 1, toCalcOp(operator))
             refreshAll()
-            binding.etExpression.setSelection(pos)
         } else {
             insertTextAtCursor(operator, toCalcOp(operator))
         }
@@ -308,7 +316,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun onPercentPressed() {
         if (justPressedEquals) justPressedEquals = false
-        val pos = binding.etExpression.selectionStart.coerceAtLeast(0)
+        val pos = cursorPosInExpr()
         val curNum = currentNumberAt(pos)
         val num = curNum.toDoubleOrNull() ?: return
 
@@ -326,12 +334,11 @@ class MainActivity : AppCompatActivity() {
 
         val pctStr = formatResult(pctVal)
         val startOfNum = if (lastOpD >= 0) lastOpD + 1 else 0
-        
+
         exprDisplay.replace(startOfNum, pos, pctStr)
         exprCalc.replace(startOfNum, pos, pctStr)
-        
+
         refreshAll()
-        binding.etExpression.setSelection(startOfNum + pctStr.length)
     }
 
     private fun onBackspacePressed() {

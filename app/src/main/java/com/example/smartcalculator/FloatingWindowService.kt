@@ -20,6 +20,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.WindowManager.LayoutParams
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -141,6 +142,7 @@ class FloatingWindowService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        SmartPopupState.isOpen = false
         manualInstances.forEach {
             removeInstanceFloat(it)
             removeInstanceBubble(it)
@@ -157,6 +159,7 @@ class FloatingWindowService : Service() {
     // ─────────────────────────────────────────────
 
     private fun showManual() {
+        SmartPopupState.isOpen = false
         removeFloat() // removes smart mode float
         currentMode = "manual"
         preMinimiseMode = "manual"
@@ -710,6 +713,7 @@ class FloatingWindowService : Service() {
     // ─────────────────────────────────────────────
 
     private fun showSmart() {
+        SmartPopupState.isOpen = true
         removeFloat()
         currentMode = "smart"
         preMinimiseMode = "smart"
@@ -738,6 +742,94 @@ class FloatingWindowService : Service() {
         val histPanel = v.findViewById<LinearLayout>(R.id.layoutHistoryPanel)
         val histItems = v.findViewById<LinearLayout>(R.id.layoutHistoryItems)
         val tvHTotal  = v.findViewById<TextView>(R.id.tvHistoryTotal)
+
+        // ── Inline expression editor (tap on history line opens keyboard) ──
+        val scrollExpr = v.findViewById<android.widget.HorizontalScrollView>(R.id.scrollSmartExpression)
+        val etExpr = v.findViewById<SmartExpressionEditText>(R.id.etSmartExpression)
+
+        fun closeExpressionEditor(commit: Boolean) {
+            if (etExpr.visibility != View.VISIBLE) return
+            if (commit) {
+                applyExpressionEdit(etExpr.text?.toString().orEmpty())
+            }
+            etExpr.visibility = View.GONE
+            scrollExpr?.visibility = View.VISIBLE
+            SmartPopupState.isEditorOpen = false
+
+            // Restore non-focusable window so popup doesn't steal global focus.
+            val params = v.layoutParams as? WindowManager.LayoutParams
+            if (params != null) {
+                params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                try { wm.updateViewLayout(v, params) } catch (_: Exception) {}
+            }
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imm.hideSoftInputFromWindow(etExpr.windowToken, 0)
+
+            refreshSmartDisplay()
+        }
+
+        fun openExpressionEditor() {
+            if (etExpr.visibility == View.VISIBLE) return
+            val current = HistoryManager.entries.joinToString("+") { HistoryManager.fmt(it.value) }
+            etExpr.setText(current)
+            etExpr.setSelection(etExpr.text?.length ?: 0)
+
+            scrollExpr?.visibility = View.GONE
+            etExpr.visibility = View.VISIBLE
+            SmartPopupState.isEditorOpen = true
+
+            // Make window focusable so the soft keyboard can deliver input here.
+            val params = v.layoutParams as? WindowManager.LayoutParams
+            if (params != null) {
+                params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                try { wm.updateViewLayout(v, params) } catch (_: Exception) {}
+            }
+            etExpr.postDelayed({
+                etExpr.requestFocus()
+                etExpr.setSelection(etExpr.text?.length ?: 0)
+                val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                imm.showSoftInput(etExpr, android.view.inputmethod.InputMethodManager.SHOW_FORCED)
+            }, 120)
+        }
+
+        // Tapping anywhere in the expression area (after the last token, between
+        // tokens, or in the surrounding padding) opens the inline editor.
+        // HorizontalScrollView's own onClick is unreliable here, so use a
+        // GestureDetector on the parent FrameLayout that wraps both the scroll
+        // and the EditText overlay.
+        val exprArea = v.findViewById<FrameLayout>(R.id.smartExpressionArea)
+        val exprItems = v.findViewById<LinearLayout>(R.id.layoutSmartExpressionItems)
+        val tapDetector = android.view.GestureDetector(
+            this,
+            object : android.view.GestureDetector.SimpleOnGestureListener() {
+                override fun onSingleTapUp(e: android.view.MotionEvent): Boolean {
+                    openExpressionEditor()
+                    return true
+                }
+            }
+        )
+        val tapTouchListener = View.OnTouchListener { _, ev ->
+            // Don't swallow events when the editor is already showing — let
+            // the EditText receive its own touches.
+            if (etExpr.visibility == View.VISIBLE) return@OnTouchListener false
+            tapDetector.onTouchEvent(ev)
+            // Returning false lets HorizontalScrollView still process scrolls;
+            // the GestureDetector will only fire onSingleTapUp for taps.
+            false
+        }
+        exprArea?.setOnTouchListener(tapTouchListener)
+        scrollExpr?.setOnTouchListener(tapTouchListener)
+        exprItems?.setOnTouchListener(tapTouchListener)
+
+        etExpr.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                closeExpressionEditor(commit = true)
+                true
+            } else false
+        }
+        etExpr.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) closeExpressionEditor(commit = true)
+        }
 
 
         // Copy: single click → compact "520+313+375" (paste into any calculator)
@@ -777,17 +869,19 @@ class FloatingWindowService : Service() {
         }
 
         v.findViewById<MaterialButton>(R.id.btnSmartUndo).setOnLongClickListener {
+            SmartPopupState.lastClearMs = System.currentTimeMillis()
             HistoryManager.clear()
             histPanel.visibility = View.GONE
-            sendBroadcast(Intent(ACTION_CLEAR_SMART))
+            sendBroadcast(Intent(ACTION_CLEAR_SMART).setPackage(packageName))
             Toast.makeText(this, "Session cleared", Toast.LENGTH_SHORT).show()
             true
         }
 
         v.findViewById<MaterialButton>(R.id.btnClearHistory).setOnClickListener {
+            SmartPopupState.lastClearMs = System.currentTimeMillis()
             HistoryManager.clear()
             histPanel.visibility = View.GONE
-            sendBroadcast(Intent(ACTION_CLEAR_SMART))
+            sendBroadcast(Intent(ACTION_CLEAR_SMART).setPackage(packageName))
             Toast.makeText(this, "Session cleared", Toast.LENGTH_SHORT).show()
         }
 
@@ -809,6 +903,7 @@ class FloatingWindowService : Service() {
 
         v.findViewById<ImageButton>(R.id.btnSmartMinimize).setOnClickListener { dockToBubble() }
         v.findViewById<ImageButton>(R.id.btnSmartClose).setOnClickListener {
+            SmartPopupState.isOpen = false
             removeFloat()
             removeBubble()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
@@ -817,6 +912,50 @@ class FloatingWindowService : Service() {
                 @Suppress("DEPRECATION") stopForeground(true)
             stopSelf()
         }
+    }
+
+    /**
+     * Commits a manually-edited expression string back into [HistoryManager].
+     * Pure additive/subtractive expressions are split into signed entries
+     * (preserving the running breakdown). Expressions with `*` or `/` are
+     * evaluated end-to-end and stored as a single result entry.
+     */
+    private fun applyExpressionEdit(raw: String) {
+        val expr = raw.trim()
+        if (expr.isEmpty()) {
+            HistoryManager.clear()
+            return
+        }
+        val hasMulDiv = expr.contains('*') || expr.contains('/')
+        if (hasMulDiv) {
+            val result = CalculatorEngine.eval(expr.trimEnd('+', '-', '*', '/', '.'))
+            HistoryManager.clear()
+            if (!result.isNaN() && !result.isInfinite()) {
+                HistoryManager.addEntry(result)
+            }
+            return
+        }
+        // Split into signed addends: e.g. "744+655-100+30" -> [744, 655, -100, 30]
+        val entries = mutableListOf<Double>()
+        var sign = 1.0
+        val buf = StringBuilder()
+        fun flush() {
+            if (buf.isEmpty()) return
+            val v = buf.toString().toDoubleOrNull()
+            if (v != null && v != 0.0) entries.add(sign * v)
+            else if (v != null) entries.add(0.0)
+            buf.clear()
+        }
+        for (c in expr) {
+            when (c) {
+                '+' -> { flush(); sign = 1.0 }
+                '-' -> { flush(); sign = -1.0 }
+                else -> buf.append(c)
+            }
+        }
+        flush()
+        HistoryManager.clear()
+        for (v in entries) HistoryManager.addEntry(v)
     }
 
     private fun refreshSmartDisplay() {
@@ -846,7 +985,7 @@ class FloatingWindowService : Service() {
                     if (i > 0) {
                         val sep = TextView(this@FloatingWindowService).apply {
                             text = " + "
-                            textSize = 15f
+                            textSize = 18f
                             setTextColor(exprColor)
                             typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
                         }
@@ -856,7 +995,7 @@ class FloatingWindowService : Service() {
                     // Number token
                     val numTv = TextView(this@FloatingWindowService).apply {
                         text = HistoryManager.fmt(entry.value)
-                        textSize = 15f
+                        textSize = 18f
                         setTextColor(exprColor)
                         typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
                         setPadding(2, 0, 2, 0)

@@ -103,16 +103,35 @@
             android:fontFamily="sans-serif-medium"/>
     </LinearLayout>
 
-    <!-- ── Discount % field ── -->
-    <TextView
-        android:layout_width="wrap_content"
+    <!-- ── Second field: Save (default) / Discount (after toggle) ── -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:text="Discount"
-        android:textColor="@color/text_secondary"
-        android:textSize="12sp"
-        android:fontFamily="sans-serif-medium"
-        android:letterSpacing="0.05"/>
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tvModeLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Save"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.05"/>
+
+        <ImageButton
+            android:id="@+id/btnSwapMode"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_marginStart="6dp"
+            android:src="@drawable/ic_swap_mode"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:tint="@color/text_secondary"
+            android:contentDescription="Toggle Save / Discount mode"
+            android:padding="4dp"/>
+    </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -140,9 +159,10 @@
             android:imeOptions="actionDone"/>
 
         <TextView
+            android:id="@+id/tvModeSuffix"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="%"
+            android:text="৳"
             android:textColor="@color/btn_operator"
             android:textSize="18sp"
             android:fontFamily="sans-serif-medium"/>
@@ -201,6 +221,7 @@
             android:gravity="center_vertical">
 
             <TextView
+                android:id="@+id/tvSecondaryResultLabel"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"

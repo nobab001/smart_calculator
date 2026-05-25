@@ -36,15 +36,29 @@ import java.util.Locale
  */
 class DiscountCalculatorDialog(context: Context) : Dialog(context) {
 
-    private lateinit var etTotal:     EditText
-    private lateinit var etDiscount:  EditText
-    private lateinit var cardResult:  LinearLayout
-    private lateinit var tvFinal:     TextView
-    private lateinit var tvSaved:     TextView
-    private lateinit var btnCopy:     Button
-    private lateinit var btnClose:    ImageButton
+    private lateinit var etTotal:      EditText
+    private lateinit var etDiscount:   EditText
+    private lateinit var cardResult:   LinearLayout
+    private lateinit var tvFinal:      TextView
+    private lateinit var tvSaved:      TextView
+    private lateinit var tvSecondaryLabel: TextView
+    private lateinit var tvModeLabel:  TextView
+    private lateinit var tvModeSuffix: TextView
+    private lateinit var btnSwapMode:  ImageButton
+    private lateinit var btnCopy:      Button
+    private lateinit var btnClose:     ImageButton
+
+    /** When true, the second field is the saved amount (currency) and the result
+     *  shows the implied discount percentage. When false (legacy / toggled),
+     *  the second field is the discount percentage. Defaults to Save mode. */
+    private var isSaveMode: Boolean = true
 
     private val fmt = NumberFormat.getNumberInstance(Locale.getDefault()).apply {
+        maximumFractionDigits = 2
+        minimumFractionDigits = 0
+    }
+
+    private val pctFmt = NumberFormat.getNumberInstance(Locale.getDefault()).apply {
         maximumFractionDigits = 2
         minimumFractionDigits = 0
     }
@@ -67,13 +81,18 @@ class DiscountCalculatorDialog(context: Context) : Dialog(context) {
     }
 
     private fun bindViews() {
-        etTotal    = findViewById(R.id.etTotalAmount)
-        etDiscount = findViewById(R.id.etDiscountPercent)
-        cardResult = findViewById(R.id.cardResult)
-        tvFinal    = findViewById(R.id.tvFinalPrice)
-        tvSaved    = findViewById(R.id.tvSavedAmount)
-        btnCopy    = findViewById(R.id.btnCopyResult)
-        btnClose   = findViewById(R.id.btnDiscountClose)
+        etTotal           = findViewById(R.id.etTotalAmount)
+        etDiscount        = findViewById(R.id.etDiscountPercent)
+        cardResult        = findViewById(R.id.cardResult)
+        tvFinal           = findViewById(R.id.tvFinalPrice)
+        tvSaved           = findViewById(R.id.tvSavedAmount)
+        tvSecondaryLabel  = findViewById(R.id.tvSecondaryResultLabel)
+        tvModeLabel       = findViewById(R.id.tvModeLabel)
+        tvModeSuffix      = findViewById(R.id.tvModeSuffix)
+        btnSwapMode       = findViewById(R.id.btnSwapMode)
+        btnCopy           = findViewById(R.id.btnCopyResult)
+        btnClose          = findViewById(R.id.btnDiscountClose)
+        applyModeUi()
     }
 
     private fun wireListeners() {
@@ -88,28 +107,60 @@ class DiscountCalculatorDialog(context: Context) : Dialog(context) {
         etTotal.addTextChangedListener(watcher)
         etDiscount.addTextChangedListener(watcher)
 
+        btnSwapMode.setOnClickListener { toggleMode() }
+
         btnCopy.setOnClickListener { copyResultToClipboard() }
+    }
+
+    // ── Mode toggle ───────────────────────────────────────────────────────
+
+    private fun toggleMode() {
+        isSaveMode = !isSaveMode
+        applyModeUi()
+        recalculate()
+    }
+
+    /** Refresh labels/suffix to match the current mode. */
+    private fun applyModeUi() {
+        if (isSaveMode) {
+            tvModeLabel.text      = "Save"
+            tvModeSuffix.text     = "৳"
+            tvSecondaryLabel.text = "Discount %"
+        } else {
+            tvModeLabel.text      = "Discount"
+            tvModeSuffix.text     = "%"
+            tvSecondaryLabel.text = "You save"
+        }
     }
 
     // ── Core calculation ──────────────────────────────────────────────────
 
     private fun recalculate() {
-        val total    = etTotal.text.toString().toDoubleOrNull()
-        val discount = etDiscount.text.toString().toDoubleOrNull()
+        val total = etTotal.text.toString().toDoubleOrNull()
+        val input = etDiscount.text.toString().toDoubleOrNull()
 
-        if (total == null || discount == null) {
+        if (total == null || input == null || total <= 0.0) {
             cardResult.visibility = View.GONE
             return
         }
 
-        // Clamp discount to [0, 100]
-        val clampedDiscount = discount.coerceIn(0.0, 100.0)
+        if (isSaveMode) {
+            // Second box = saved amount in currency; clamp to [0, total]
+            val saved      = input.coerceIn(0.0, total)
+            val finalPrice = round(total - saved)
+            val pct        = round(saved / total * 100.0)
 
-        val saved      = round(total * clampedDiscount / 100.0)
-        val finalPrice = round(total - saved)
+            tvFinal.text = fmt.format(finalPrice)
+            tvSaved.text = pctFmt.format(pct) + "%"
+        } else {
+            // Second box = discount percentage; clamp to [0, 100]
+            val pct        = input.coerceIn(0.0, 100.0)
+            val saved      = round(total * pct / 100.0)
+            val finalPrice = round(total - saved)
 
-        tvFinal.text = fmt.format(finalPrice)
-        tvSaved.text = fmt.format(saved)
+            tvFinal.text = fmt.format(finalPrice)
+            tvSaved.text = fmt.format(saved)
+        }
 
         cardResult.visibility = View.VISIBLE
     }
@@ -120,15 +171,27 @@ class DiscountCalculatorDialog(context: Context) : Dialog(context) {
     // ── Copy ──────────────────────────────────────────────────────────────
 
     private fun copyResultToClipboard() {
-        val total    = etTotal.text.toString().toDoubleOrNull() ?: return
-        val discount = etDiscount.text.toString().toDoubleOrNull() ?: return
-        val saved      = round(total * discount.coerceIn(0.0, 100.0) / 100.0)
-        val finalPrice = round(total - saved)
+        val total = etTotal.text.toString().toDoubleOrNull() ?: return
+        val input = etDiscount.text.toString().toDoubleOrNull() ?: return
+        if (total <= 0.0) return
 
-        val text = "Total: ${fmt.format(total)}\n" +
-                   "Discount: ${fmt.format(discount)}%\n" +
-                   "Final Price: ${fmt.format(finalPrice)}\n" +
-                   "You save: ${fmt.format(saved)}"
+        val text = if (isSaveMode) {
+            val saved      = input.coerceIn(0.0, total)
+            val finalPrice = round(total - saved)
+            val pct        = round(saved / total * 100.0)
+            "Total: ${fmt.format(total)}\n" +
+                "Save: ${fmt.format(saved)}\n" +
+                "Final Price: ${fmt.format(finalPrice)}\n" +
+                "Discount: ${pctFmt.format(pct)}%"
+        } else {
+            val pct        = input.coerceIn(0.0, 100.0)
+            val saved      = round(total * pct / 100.0)
+            val finalPrice = round(total - saved)
+            "Total: ${fmt.format(total)}\n" +
+                "Discount: ${fmt.format(pct)}%\n" +
+                "Final Price: ${fmt.format(finalPrice)}\n" +
+                "You save: ${fmt.format(saved)}"
+        }
 
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("Discount Result", text))
