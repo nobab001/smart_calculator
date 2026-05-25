@@ -74,11 +74,11 @@ object AppGuard {
             pm.getPackageInfo(ctx.packageName, PackageManager.GET_SIGNATURES)
         }
         val bytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            info.signingInfo.apkContentsSigners[0].toByteArray()
+            info.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
         } else {
             @Suppress("DEPRECATION")
-            info.signatures[0].toByteArray()
-        }
+            info.signatures?.firstOrNull()?.toByteArray()
+        } ?: return@runCatching null
         MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString("") { "%02x".format(it) }
     }.getOrNull()
