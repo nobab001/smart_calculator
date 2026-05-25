@@ -659,13 +659,13 @@ class FloatingWindowService : Service() {
                                 etTitle.visibility = View.VISIBLE
                                 etTitle.setText(instance.titleText)
 
-                                // 3. After layout settles: focus + select all + open keyboard
-                                etTitle.post {
+                                // 3. After WindowManager processes flag change: focus + select all + keyboard
+                                etTitle.postDelayed({
                                     etTitle.requestFocus()
                                     etTitle.selectAll()
                                     val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
                                     imm.showSoftInput(etTitle, android.view.inputmethod.InputMethodManager.SHOW_FORCED)
-                                }
+                                }, 120)
                             }
                             lastClickTime = clickTime
                         }
