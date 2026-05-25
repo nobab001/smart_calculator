@@ -29,7 +29,7 @@
         <LinearLayout
             android:id="@+id/floatManualHeader"
             android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="33dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:paddingLeft="10dp"
@@ -48,30 +48,30 @@
 
             <ImageButton
                 android:id="@+id/btnFloatMinimize"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
                 android:src="@drawable/ic_minimize"
                 android:background="@drawable/bg_icon_btn"
                 android:contentDescription="Minimize"
-                android:padding="8dp"/>
+                android:padding="6dp"/>
 
             <Space android:layout_width="6dp" android:layout_height="1dp"/>
 
             <ImageButton
                 android:id="@+id/btnFloatClose"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
                 android:src="@drawable/ic_close"
                 android:background="@drawable/bg_icon_btn"
                 android:contentDescription="Close"
-                android:padding="8dp"/>
+                android:padding="6dp"/>
         </LinearLayout>
 
         <!-- ── Display ── -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1.2"
+            android:layout_weight="1.5"
             android:orientation="vertical"
             android:gravity="bottom|end"
             android:paddingLeft="16dp"
@@ -130,7 +130,7 @@
         <GridLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="3.8"
+            android:layout_weight="3.5"
             android:columnCount="4"
             android:rowCount="4"
             android:padding="1dp"
