@@ -36,15 +36,47 @@
             android:paddingRight="10dp"
             android:background="@color/bg_float_header">
 
-            <TextView
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Calculator"
-                android:textColor="@color/text_secondary"
-                android:textSize="13sp"
-                android:fontFamily="sans-serif-medium"
-                android:letterSpacing="0.05"/>
+                android:layout_weight="1">
+
+                <TextView
+                    android:id="@+id/tvFloatTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Calculator"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp"
+                    android:fontFamily="sans-serif-medium"
+                    android:letterSpacing="0.05"
+                    android:singleLine="true"/>
+
+                <EditText
+                    android:id="@+id/etFloatTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_primary"
+                    android:background="@null"
+                    android:singleLine="true"
+                    android:imeOptions="actionDone"
+                    android:visibility="gone"
+                    android:fontFamily="sans-serif-medium"
+                    android:letterSpacing="0.05"
+                    android:textColorHint="@color/text_secondary"/>
+            </FrameLayout>
+
+            <ImageButton
+                android:id="@+id/btnFloatClone"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:src="@drawable/ic_clone"
+                android:background="@drawable/bg_icon_btn"
+                android:contentDescription="Clone"
+                android:padding="6dp"/>
+
+            <Space android:layout_width="2dp" android:layout_height="1dp"/>
 
             <ImageButton
                 android:id="@+id/btnFloatMinimize"
@@ -85,8 +117,8 @@
                 android:fillViewport="true"
                 android:scrollbars="none"
                 android:overScrollMode="never"
-                android:layout_marginLeft="3dp"
-                android:layout_marginRight="3dp">
+                android:layout_marginLeft="5dp"
+                android:layout_marginRight="5dp">
 
                 <TextView
                     android:id="@+id/tvFloatExpression"

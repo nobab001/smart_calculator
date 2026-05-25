@@ -67,11 +67,25 @@ class FloatingWindowService : Service() {
     private var bubbleLastX = 0
     private var bubbleLastY = 300
 
-    // ── Manual calc state (exp4j expression engine) ───────────────────────
-    private val floatExprDisplay = StringBuilder()   // "10+5×2"  shown to user
-    private val floatExprCalc    = StringBuilder()   // "10+5*2"  fed to exp4j
-    private var floatHasDecimal  = false
-    private var floatJustEquals  = false
+    // ── Multiple Manual Calculator Instances ──────────────────────────────
+    private val manualInstances = mutableListOf<ManualInstance>()
+
+    private class ManualInstance(val id: Int) {
+        var floatView: View? = null
+        var bubbleView: View? = null
+        var params: WindowManager.LayoutParams? = null
+        var bubbleParams: WindowManager.LayoutParams? = null
+        var isMinimized = false
+        var titleText = "Calculator"
+
+        val floatExprDisplay = StringBuilder()
+        val floatExprCalc = StringBuilder()
+        var floatHasDecimal = false
+        var floatJustEquals = false
+
+        var bubbleLastX = 80 + (id - 1) * 100
+        var bubbleLastY = 300 + (id - 1) * 150
+    }
 
     // ── Receivers ─────────────────────────────────
     private val receiver = object : BroadcastReceiver() {
@@ -121,6 +135,11 @@ class FloatingWindowService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        manualInstances.forEach {
+            removeInstanceFloat(it)
+            removeInstanceBubble(it)
+        }
+        manualInstances.clear()
         removeFloat()
         removeBubble()
         unregisterReceiver(receiver)
@@ -132,42 +151,198 @@ class FloatingWindowService : Service() {
     // ─────────────────────────────────────────────
 
     private fun showManual() {
-        removeFloat()
+        removeFloat() // removes smart mode float
         currentMode = "manual"
         preMinimiseMode = "manual"
 
+        if (manualInstances.isEmpty()) {
+            val first = ManualInstance(id = 1)
+            manualInstances.add(first)
+        }
+        
+        manualInstances.forEach {
+            showManualInstance(it)
+        }
+    }
+
+    private fun showManualInstance(instance: ManualInstance) {
+        if (instance.floatView != null && !instance.isMinimized) return
+        
+        if (instance.isMinimized) {
+            removeInstanceBubble(instance)
+            instance.isMinimized = false
+        }
+
         val view = inflate(R.layout.layout_floating_manual)
-        floatView = view
+        instance.floatView = view
 
         applyPopupTheme(view, PopupThemeManager.getManualTheme(this), isManual = true)
 
-        // Fixed initial size: 300 × 360 dp — GridLayout fills remaining space
-        val params = buildParams(300, 360)
-        wireManualButtons(view)
+        updateInstanceTitles()
+
+        // Set the title
+        view.findViewById<TextView>(R.id.tvFloatTitle)?.text = instance.titleText
+
+        val initialX = 80 + (instance.id - 1) * 60
+        val initialY = 200 + (instance.id - 1) * 80
+        val params = buildParams(300, 360).apply {
+            x = initialX
+            y = initialY
+        }
+        instance.params = params
+
+        wireManualInstanceButtons(instance, view)
         makeDraggable(view.findViewById(R.id.floatManualHeader), view, params)
+        
         val resizeRight = view.findViewById<View>(R.id.resizeRight)
         val resizeLeft = view.findViewById<View>(R.id.resizeLeft)
         if (resizeRight != null && resizeLeft != null) {
             attachManualResizeHandles(resizeRight, resizeLeft, view, params)
         }
+        
         wm.addView(view, params)
     }
 
-    private fun wireManualButtons(v: View) {
+    private fun updateInstanceTitles() {
+        if (manualInstances.size > 1) {
+            manualInstances.forEachIndexed { index, inst ->
+                if (inst.titleText == "Calculator") {
+                    inst.titleText = "Calculator ${index + 1}"
+                    inst.floatView?.findViewById<TextView>(R.id.tvFloatTitle)?.text = inst.titleText
+                }
+            }
+        } else if (manualInstances.size == 1) {
+            val inst = manualInstances[0]
+            if (inst.titleText.startsWith("Calculator ")) {
+                inst.titleText = "Calculator"
+                inst.floatView?.findViewById<TextView>(R.id.tvFloatTitle)?.text = inst.titleText
+            }
+        }
+    }
+
+    private fun cloneManualInstance() {
+        if (manualInstances.size >= 2) {
+            Toast.makeText(this, "Maximum 2 calculators allowed", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val newId = if (manualInstances.any { it.id == 1 }) 2 else 1
+        val newInstance = ManualInstance(newId)
+        manualInstances.add(newInstance)
+        showManualInstance(newInstance)
+    }
+
+    private fun dockInstanceToBubble(instance: ManualInstance) {
+        if (instance.isMinimized) return
+        instance.isMinimized = true
+        removeInstanceFloat(instance)
+
+        val view = inflate(R.layout.layout_floating_bubble)
+        instance.bubbleView = view
+
+        val params = buildParams(24, 24).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = instance.bubbleLastX
+            y = instance.bubbleLastY
+        }
+        instance.bubbleParams = params
+
+        view.findViewById<TextView>(R.id.tvBubbleText)?.text = if (instance.titleText.startsWith("Calculator")) {
+            instance.id.toString()
+        } else {
+            instance.titleText.take(1)
+        }
+
+        var initX = 0; var initY = 0; var initRx = 0f; var initRy = 0f; var moved = false
+
+        view.setOnTouchListener { _, ev ->
+            when (ev.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initX = params.x; initY = params.y
+                    initRx = ev.rawX; initRy = ev.rawY
+                    moved = false; true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    params.x = initX + (ev.rawX - initRx).toInt()
+                    params.y = initY + (ev.rawY - initRy).toInt()
+                    try { wm.updateViewLayout(view, params) } catch (_: Exception) {}
+                    if (Math.abs(ev.rawX - initRx) > 8 || Math.abs(ev.rawY - initRy) > 8) moved = true
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!moved) {
+                        instance.bubbleLastX = params.x
+                        instance.bubbleLastY = params.y
+                        removeInstanceBubble(instance)
+                        showManualInstance(instance)
+                    } else {
+                        snapInstanceBubble(instance, params)
+                    }
+                    false
+                }
+                else -> false
+            }
+        }
+
+        wm.addView(view, params)
+    }
+
+    private fun snapInstanceBubble(instance: ManualInstance, params: LayoutParams) {
+        val bv = instance.bubbleView ?: return
+        val screenW = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            wm.currentWindowMetrics.bounds.width()
+        else
+            @Suppress("DEPRECATION") wm.defaultDisplay.width
+        params.x = if (params.x + dpToPx(12) < screenW / 2) 0 else screenW - dpToPx(24)
+        try { wm.updateViewLayout(bv, params) } catch (_: Exception) {}
+        instance.bubbleLastX = params.x
+        instance.bubbleLastY = params.y
+    }
+
+    private fun removeInstanceFloat(instance: ManualInstance) {
+        instance.floatView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        instance.floatView = null
+    }
+
+    private fun removeInstanceBubble(instance: ManualInstance) {
+        instance.bubbleView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        instance.bubbleView = null
+    }
+
+    private fun resetCalcState(instance: ManualInstance) {
+        instance.floatExprDisplay.clear()
+        instance.floatExprCalc.clear()
+        instance.floatHasDecimal = false
+        instance.floatJustEquals = false
+    }
+
+    private fun stopSelfService() {
+        removeFloat()
+        removeBubble()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        else
+            @Suppress("DEPRECATION") stopForeground(true)
+        stopSelf()
+    }
+
+    private fun wireManualInstanceButtons(instance: ManualInstance, v: View) {
         val display  = v.findViewById<TextView>(R.id.tvFloatResult)
         val exprView = v.findViewById<TextView>(R.id.tvFloatExpression)
         val svExpr   = v.findViewById<android.widget.HorizontalScrollView>(R.id.svFloatExpression)
         val opView   = v.findViewById<TextView>(R.id.tvFloatOperator)
+        
+        val tvTitle  = v.findViewById<TextView>(R.id.tvFloatTitle)
+        val etTitle  = v.findViewById<android.widget.EditText>(R.id.etFloatTitle)
 
         // ── helpers ──────────────────────────────────────────────────────
 
         fun currentNumber(): String {
-            val expr = floatExprDisplay.toString()
+            val expr = instance.floatExprDisplay.toString()
             val lastOp = expr.indexOfLast { it == '+' || it == '−' || it == '×' || it == '÷' }
             return if (lastOp < 0) expr else expr.substring(lastOp + 1)
         }
 
-        fun endsWithOp() = floatExprCalc.lastOrNull()
+        fun endsWithOp() = instance.floatExprCalc.lastOrNull()
             ?.let { it == '+' || it == '-' || it == '*' || it == '/' } ?: false
 
         fun toCalcOp(op: String) = CalculatorEngine.toCalcOp(op)
@@ -191,12 +366,12 @@ class FloatingWindowService : Service() {
         }
 
         fun update() {
-            val expr = floatExprDisplay.toString()
-            val calcExpr = floatExprCalc.toString()
+            val expr = instance.floatExprDisplay.toString()
+            val calcExpr = instance.floatExprCalc.toString()
             val lastOp = expr.indexOfLast { it == '+' || it == '−' || it == '×' || it == '÷' }
 
-            if (floatJustEquals) {
-                display.text  = fmtNum(floatExprDisplay.toString().ifEmpty { "0" })
+            if (instance.floatJustEquals) {
+                display.text  = fmtNum(instance.floatExprDisplay.toString().ifEmpty { "0" })
                 exprView.text = ""
                 opView?.text  = "="
             } else {
@@ -231,61 +406,61 @@ class FloatingWindowService : Service() {
         // ── input handlers ───────────────────────────────────────────────
 
         fun onDigit(d: String) {
-            if (floatJustEquals) {
-                floatExprDisplay.clear(); floatExprCalc.clear()
-                floatHasDecimal = false; floatJustEquals = false
+            if (instance.floatJustEquals) {
+                instance.floatExprDisplay.clear(); instance.floatExprCalc.clear()
+                instance.floatHasDecimal = false; instance.floatJustEquals = false
             }
-            if (floatExprCalc.length < 1000) {
-                floatExprDisplay.append(d); floatExprCalc.append(d)
+            if (instance.floatExprCalc.length < 1000) {
+                instance.floatExprDisplay.append(d); instance.floatExprCalc.append(d)
             }
             update()
         }
 
         fun onOperator(op: String) {
-            if (floatExprCalc.isEmpty() && op == "−") {
-                floatExprDisplay.append("−"); floatExprCalc.append("-")
+            if (instance.floatExprCalc.isEmpty() && op == "−") {
+                instance.floatExprDisplay.append("−"); instance.floatExprCalc.append("-")
                 update(); return
             }
-            if (floatExprCalc.isEmpty()) return
-            if (floatJustEquals) floatJustEquals = false
+            if (instance.floatExprCalc.isEmpty()) return
+            if (instance.floatJustEquals) instance.floatJustEquals = false
             if (endsWithOp()) {
-                floatExprDisplay.deleteCharAt(floatExprDisplay.length - 1)
-                floatExprCalc.deleteCharAt(floatExprCalc.length - 1)
+                instance.floatExprDisplay.deleteCharAt(instance.floatExprDisplay.length - 1)
+                instance.floatExprCalc.deleteCharAt(instance.floatExprCalc.length - 1)
             }
-            floatExprDisplay.append(op)
-            floatExprCalc.append(toCalcOp(op))
-            floatHasDecimal = false
+            instance.floatExprDisplay.append(op)
+            instance.floatExprCalc.append(toCalcOp(op))
+            instance.floatHasDecimal = false
             update()
         }
 
         fun onEquals() {
-            if (floatExprCalc.isEmpty()) return
+            if (instance.floatExprCalc.isEmpty()) return
             if (endsWithOp()) {
-                floatExprDisplay.deleteCharAt(floatExprDisplay.length - 1)
-                floatExprCalc.deleteCharAt(floatExprCalc.length - 1)
+                instance.floatExprDisplay.deleteCharAt(instance.floatExprDisplay.length - 1)
+                instance.floatExprCalc.deleteCharAt(instance.floatExprCalc.length - 1)
             }
-            if (floatExprCalc.isEmpty()) return
-            val result = CalculatorEngine.eval(floatExprCalc.toString())
+            if (instance.floatExprCalc.isEmpty()) return
+            val result = CalculatorEngine.eval(instance.floatExprCalc.toString())
             if (result.isNaN() || result.isInfinite()) {
                 display.text = "Error"; exprView.text = ""; return
             }
             val resultStr = fmtResult(result)
-            floatExprDisplay.clear(); floatExprDisplay.append(resultStr)
-            floatExprCalc.clear();    floatExprCalc.append(resultStr)
-            floatHasDecimal = resultStr.contains('.')
-            floatJustEquals = true
+            instance.floatExprDisplay.clear(); instance.floatExprDisplay.append(resultStr)
+            instance.floatExprCalc.clear();    instance.floatExprCalc.append(resultStr)
+            instance.floatHasDecimal = resultStr.contains('.')
+            instance.floatJustEquals = true
             update()
         }
 
         fun onBackspace() {
-            if (floatJustEquals) {
-                resetCalcState(); display.text = "0"; exprView.text = ""; return
+            if (instance.floatJustEquals) {
+                resetCalcState(instance); display.text = "0"; exprView.text = ""; return
             }
-            if (floatExprDisplay.isEmpty()) return
-            val removed = floatExprDisplay.last()
-            floatExprDisplay.deleteCharAt(floatExprDisplay.length - 1)
-            floatExprCalc.deleteCharAt(floatExprCalc.length - 1)
-            floatHasDecimal = if (removed == '.') false else currentNumber().contains('.')
+            if (instance.floatExprDisplay.isEmpty()) return
+            val removed = instance.floatExprDisplay.last()
+            instance.floatExprDisplay.deleteCharAt(instance.floatExprDisplay.length - 1)
+            instance.floatExprCalc.deleteCharAt(instance.floatExprCalc.length - 1)
+            instance.floatHasDecimal = if (removed == '.') false else currentNumber().contains('.')
             update()
         }
 
@@ -301,22 +476,89 @@ class FloatingWindowService : Service() {
             v.findViewById<MaterialButton>(id).setOnClickListener { onDigit(d) }
         }
 
-        v.findViewById<MaterialButton>(R.id.btnFloatClear).setOnClickListener     { resetCalcState(); update() }
+        v.findViewById<MaterialButton>(R.id.btnFloatClear).setOnClickListener     { resetCalcState(instance); update() }
         v.findViewById<MaterialButton>(R.id.btnFloatBackspace).setOnClickListener { onBackspace() }
         v.findViewById<MaterialButton>(R.id.btnFloatAdd).setOnClickListener       { onOperator("+") }
         v.findViewById<MaterialButton>(R.id.btnFloatSubtract).setOnClickListener  { onOperator("−") }
         v.findViewById<MaterialButton>(R.id.btnFloatMultiply).setOnClickListener  { onOperator("×") }
         v.findViewById<MaterialButton>(R.id.btnFloatEquals).setOnClickListener    { onEquals() }
 
-        v.findViewById<ImageButton>(R.id.btnFloatMinimize).setOnClickListener { dockToBubble() }
+        v.findViewById<ImageButton>(R.id.btnFloatClone).setOnClickListener {
+            cloneManualInstance()
+        }
+
+        v.findViewById<ImageButton>(R.id.btnFloatMinimize).setOnClickListener { dockInstanceToBubble(instance) }
         v.findViewById<ImageButton>(R.id.btnFloatClose).setOnClickListener {
-            removeFloat()
-            removeBubble()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            else
-                @Suppress("DEPRECATION") stopForeground(true)
-            stopSelf()
+            removeInstanceFloat(instance)
+            removeInstanceBubble(instance)
+            manualInstances.remove(instance)
+            if (manualInstances.isEmpty()) {
+                stopSelfService()
+            } else {
+                updateInstanceTitles()
+            }
+        }
+
+        // ── Title Editing Logic ──
+
+        fun saveAndCloseEditor() {
+            if (etTitle == null || tvTitle == null) return
+            val newTitle = etTitle.text.toString().trim()
+            if (newTitle.isNotEmpty()) {
+                instance.titleText = newTitle
+                tvTitle.text = newTitle
+            }
+            etTitle.visibility = View.GONE
+            tvTitle.visibility = View.VISIBLE
+            
+            instance.params?.let { p ->
+                p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+            }
+
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imm.hideSoftInputFromWindow(etTitle.windowToken, 0)
+        }
+
+        if (tvTitle != null && etTitle != null) {
+            setDoubleClickListener(tvTitle) {
+                tvTitle.visibility = View.GONE
+                etTitle.visibility = View.VISIBLE
+                etTitle.setText(instance.titleText)
+                etTitle.selectAll()
+                etTitle.requestFocus()
+
+                instance.params?.let { p ->
+                    p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                    try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+                }
+
+                val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                imm.showSoftInput(etTitle, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            }
+
+            etTitle.setOnFocusChangeListener { _, hasFocus ->
+                if (!hasFocus) {
+                    saveAndCloseEditor()
+                }
+            }
+
+            etTitle.setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                    saveAndCloseEditor()
+                    true
+                } else false
+            }
+
+            val contentView = v.findViewById<View>(R.id.manualFloatContent)
+            contentView?.setOnTouchListener { _, event ->
+                if (event.action == MotionEvent.ACTION_DOWN) {
+                    if (etTitle.hasFocus()) {
+                        contentView.requestFocus()
+                    }
+                }
+                false
+            }
         }
 
         update()
@@ -808,10 +1050,7 @@ class FloatingWindowService : Service() {
     // Manual calc logic
     // ─────────────────────────────────────────────
 
-    private fun resetCalcState() {
-        floatExprDisplay.clear(); floatExprCalc.clear()
-        floatHasDecimal = false; floatJustEquals = false
-    }
+
 
     // ─────────────────────────────────────────────
     // Formatting
@@ -872,6 +1111,7 @@ class FloatingWindowService : Service() {
             tintImageButtons(root, colorSecondary)
 
             root.findViewById<TextView>(R.id.tvFloatOperator)?.setTextColor(colorSecondary)
+            root.findViewById<android.widget.EditText>(R.id.etFloatTitle)?.setTextColor(colorPrimary)
 
             if (!isManual) {
                 // Custom text/button colors for Smart mode in Dark
@@ -916,6 +1156,7 @@ class FloatingWindowService : Service() {
             tintImageButtons(root, colorSecondary)
 
             root.findViewById<TextView>(R.id.tvFloatOperator)?.setTextColor(colorSecondary)
+            root.findViewById<android.widget.EditText>(R.id.etFloatTitle)?.setTextColor(colorPrimary)
 
             if (!isManual) {
                 // Custom text/button colors for Smart mode in Light
