@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">A Smart Calculator</string>
+    <string name="accessibility_service_label">A Smart Calculator – WhatsApp Digits</string>
     <string name="accessibility_service_description">SmartCalculator reads numbers from WhatsApp messages for automatic summing. No personal data is stored or transmitted.</string>
     <string name="channel_name">Floating Calculator</string>
     <string name="channel_desc">Shows the floating calculator window</string>
