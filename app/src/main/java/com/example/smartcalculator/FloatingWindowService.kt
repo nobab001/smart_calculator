@@ -1227,7 +1227,7 @@ class FloatingWindowService : Service() {
                 wm.currentWindowMetrics.bounds.width()
             else
                 @Suppress("DEPRECATION") wm.defaultDisplay.width
-            val bubbleW = if (view.width > 0) view.width else dpToPx(36)
+            val bubbleW = if (view.width > 0) view.width else dpToPx(30)
             params.x = screenW - bubbleW
             try { wm.updateViewLayout(view, params) } catch (_: Exception) {}
             bubbleLastX = params.x
@@ -1274,7 +1274,7 @@ class FloatingWindowService : Service() {
             wm.currentWindowMetrics.bounds.width()
         else
             @Suppress("DEPRECATION") wm.defaultDisplay.width
-        val bubbleW = if (bv.width > 0) bv.width else dpToPx(36)
+        val bubbleW = if (bv.width > 0) bv.width else dpToPx(30)
         params.x = if (params.x + bubbleW / 2 < screenW / 2) 0 else screenW - bubbleW
         wm.updateViewLayout(bv, params)
         bubbleLastX = params.x
