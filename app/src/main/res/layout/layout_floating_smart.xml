@@ -28,8 +28,21 @@
             android:paddingHorizontal="8dp"
             android:background="@color/bg_float_header">
 
+            <!-- History button on the LEFT of title -->
+            <ImageButton
+                android:id="@+id/btnSmartHistory"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:src="@drawable/ic_history"
+                android:background="@drawable/bg_icon_btn"
+                android:contentDescription="History"
+                android:padding="5dp"
+                android:alpha="0.75"/>
+
+            <Space android:layout_width="4dp" android:layout_height="1dp"/>
 
             <TextView
+                android:id="@+id/tvSmartTitle"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -207,111 +220,24 @@
                 android:insetBottom="0dp"/>
         </LinearLayout>
 
-        <!-- ── History Panel (hidden by default) ── -->
-        <LinearLayout
-            android:id="@+id/layoutHistoryPanel"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1.2"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <!-- History divider -->
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@color/divider"/>
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="HISTORY"
-                android:textColor="@color/text_secondary"
-                android:textSize="10sp"
-                android:letterSpacing="0.15"
-                android:gravity="center"
-                android:paddingTop="8dp"
-                android:fontFamily="sans-serif-medium"/>
-
-            <!-- Scrollable container for history items -->
-            <ScrollView
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
-                android:overScrollMode="never"
-                android:scrollbars="vertical">
-                <LinearLayout
-                    android:id="@+id/layoutHistoryItems"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:paddingHorizontal="12dp"
-                    android:paddingTop="4dp"/>
-            </ScrollView>
-
-            <!-- Divider before total -->
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginHorizontal="12dp"
-                android:layout_marginTop="4dp"
-                android:background="@color/btn_operator"/>
-
-            <TextView
-                android:id="@+id/tvHistoryTotal"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Total: 0"
-                android:textColor="@color/btn_operator"
-                android:textSize="15sp"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="end"
-                android:paddingHorizontal="12dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"/>
-
-            <!-- Clear session button -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnClearHistory"
-                android:layout_width="match_parent"
-                android:layout_height="40dp"
-                android:layout_marginHorizontal="10dp"
-                android:layout_marginTop="4dp"
-                android:layout_marginBottom="10dp"
-                android:text="Clear Session"
-                android:textSize="12sp"
-                android:textColor="@color/text_primary"
-                app:backgroundTint="@color/btn_function"
-                app:cornerRadius="10dp"
-                android:stateListAnimator="@null"
-                android:elevation="0dp"
-                android:insetTop="0dp"
-                android:insetBottom="0dp"/>
-        </LinearLayout>
     </LinearLayout>
 
-    <!-- Bottom-right resize handle -->
-    <ImageView
+    <!-- Bottom-right resize handle — invisible but touch-active -->
+    <View
         android:id="@+id/smartResizeRight"
         android:layout_width="24dp"
         android:layout_height="24dp"
         android:layout_gravity="bottom|end"
-        android:src="@drawable/ic_resize_corner"
-        android:padding="4dp"
         android:contentDescription="Resize Right"
         android:clickable="true"
         android:focusable="true"/>
 
-    <!-- Bottom-left resize handle -->
-    <ImageView
+    <!-- Bottom-left resize handle — invisible but touch-active -->
+    <View
         android:id="@+id/smartResizeLeft"
         android:layout_width="24dp"
         android:layout_height="24dp"
         android:layout_gravity="bottom|start"
-        android:src="@drawable/ic_resize_corner"
-        android:rotation="90"
-        android:scaleX="-1"
-        android:padding="4dp"
         android:contentDescription="Resize Left"
         android:clickable="true"
         android:focusable="true"/>

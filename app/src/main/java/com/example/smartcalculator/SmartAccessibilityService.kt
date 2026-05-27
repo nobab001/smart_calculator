@@ -851,12 +851,14 @@ class SmartAccessibilityService : AccessibilityService() {
      *    chains of qualifying tokens around them.
      */
     private fun parseNumericValue(raw: String): Double? {
-        // Convert emojis and Bengali digits to English first, then sanitize
         val withEnglishDigits = convertEmojisAndBengaliToEnglish(raw)
         val sanitized = withEnglishDigits
             .replace(TIME_REGEX, " ")
             .replace(FORMATTED_PHONE_REGEX, " ")
             .replace(",", "")
+            // Remove any '.' that is NOT between two digits
+            // e.g. "Done.814" → "Done 814"  (so 814 is parsed, not 0.814)
+            .replace(Regex("(?<![0-9])\\.(?![0-9])"), " ")
             .trim()
         if (sanitized.isBlank()) return null
 
@@ -869,22 +871,47 @@ class SmartAccessibilityService : AccessibilityService() {
         }.toList()
         if (tokens.isEmpty()) return null
 
-        // Returns the trimmed operator string between two consecutive (in `tokens`) tokens,
-        // or null if the tokens are not consecutive in the token list.
-        fun opBetween(aIdx: Int, bIdx: Int): String? {
-            if (bIdx != aIdx + 1) return null
-            return sanitized.substring(tokens[aIdx].end, tokens[bIdx].start).trim()
+        data class ProcessedToken(
+            val originalValue: Double,
+            val value: Double,
+            val digits: Int,
+            val start: Int,
+            val end: Int,
+            val isNegative: Boolean,
+            val binaryOp: String
+        )
+
+        val processedTokens = tokens.mapIndexed { i, t ->
+            var isNegative = false
+            var binaryOp = ""
+            if (i == 0) {
+                val prefix = sanitized.substring(0, t.start).trim()
+                if (prefix.endsWith("-") || prefix.endsWith("−")) {
+                    isNegative = true
+                }
+            } else {
+                val gap = sanitized.substring(tokens[i-1].end, t.start).trim()
+                val normGap = gap.replace("−", "-")
+                if (normGap.endsWith("-")) {
+                    isNegative = true
+                    binaryOp = normGap.dropLast(1).trim()
+                } else {
+                    binaryOp = normGap
+                }
+            }
+            val finalVal = if (isNegative) -t.value else t.value
+            ProcessedToken(t.value, finalVal, t.digits, t.start, t.end, isNegative, binaryOp)
         }
 
-        // Indices (into `tokens`) of qualifying tokens, in order.
-        val qualIdx = tokens.indices.filter { i ->
-            val t = tokens[i]
+        // Indices of qualifying tokens
+        val qualIdx = processedTokens.indices.filter { i ->
+            val t = processedTokens[i]
             if (t.digits in MIN_MONEY_DIGITS..MAX_MONEY_DIGITS) {
                 true
             } else if (t.digits == 2) {
-                val prevOp = if (i > 0) opBetween(i - 1, i) else null
-                val nextOp = if (i < tokens.size - 1) opBetween(i, i + 1) else null
-                prevOp == "+" || prevOp == "-" || nextOp == "+" || nextOp == "-"
+                val prevOp = if (i > 0) processedTokens[i].binaryOp else null
+                val nextOp = if (i < processedTokens.size - 1) processedTokens[i + 1].binaryOp else null
+                prevOp == "+" || prevOp == "-" || prevOp == "−" || nextOp == "+" || nextOp == "-" || nextOp == "−"
             } else {
                 false
             }
@@ -896,17 +923,81 @@ class SmartAccessibilityService : AccessibilityService() {
         for (k in 0 until qualIdx.size - 1) {
             val a = qualIdx[k]
             val b = qualIdx[k + 1]
-            val op = opBetween(a, b) ?: continue
-            if (op == "/" || op == "*") {
-                excluded.add(a); excluded.add(b)
+            if (b == a + 1) {
+                val op = processedTokens[b].binaryOp.trim()
+                if (op == "/" || op == "*") {
+                    excluded.add(a)
+                    excluded.add(b)
+                }
             }
         }
 
         val remaining = qualIdx.filter { it !in excluded }
         if (remaining.isEmpty()) return null
 
-        // Step 2: group remaining into `+`/`-`-chains. Two qualifying tokens belong to the same
-        // chain iff they are consecutive in `tokens` AND joined by a lone `+` or `-`.
+        // Helper to evaluate a list of indices as a chain of + / -
+        fun evalChain(chain: List<Int>): Double {
+            if (chain.isEmpty()) return 0.0
+            var value = processedTokens[chain[0]].value
+            for (i in 1 until chain.size) {
+                val idx = chain[i]
+                val op = processedTokens[idx].binaryOp.trim()
+                val nextVal = processedTokens[idx].value
+                if (op == "-" || op == "−") {
+                    value -= nextVal
+                } else {
+                    value += nextVal
+                }
+            }
+            return value
+        }
+
+        // Step 2: Check for a total at the end of the expression
+        val lastIdx = remaining.last()
+        val lastToken = processedTokens[lastIdx]
+        val lastOp = lastToken.binaryOp.trim()
+
+        if (remaining.size >= 2 && (lastOp.contains("=") || lastOp == "-" || lastOp == "−")) {
+            val precedingIdxs = remaining.dropLast(1)
+            // Group precedingIdxs into chains of + / -
+            val chains = mutableListOf<MutableList<Int>>()
+            var current = mutableListOf<Int>()
+            for (idx in precedingIdxs) {
+                if (current.isEmpty()) {
+                    current.add(idx)
+                } else {
+                    val prev = current.last()
+                    if (idx == prev + 1) {
+                        val op = processedTokens[idx].binaryOp.trim()
+                        if (op == "+" || op == "-" || op == "−") {
+                            current.add(idx)
+                        } else {
+                            chains.add(current)
+                            current = mutableListOf(idx)
+                        }
+                    } else {
+                        chains.add(current)
+                        current = mutableListOf(idx)
+                    }
+                }
+            }
+            if (current.isNotEmpty()) chains.add(current)
+
+            if (chains.isNotEmpty()) {
+                val lastSubChain = chains.last()
+                val S = evalChain(lastSubChain)
+                if (Math.abs(Math.abs(S) - lastToken.originalValue) < 0.001) {
+                    // It is a total!
+                    return if (lastOp == "-" || lastOp == "−") {
+                        -lastToken.originalValue
+                    } else {
+                        lastToken.originalValue
+                    }
+                }
+            }
+        }
+
+        // Step 3: Default behavior - group ALL remaining qualifying tokens into + / - chains
         val chains = mutableListOf<MutableList<Int>>()
         var current = mutableListOf<Int>()
         for (idx in remaining) {
@@ -914,9 +1005,14 @@ class SmartAccessibilityService : AccessibilityService() {
                 current.add(idx)
             } else {
                 val prev = current.last()
-                val op = opBetween(prev, idx)
-                if (op == "+" || op == "-") {
-                    current.add(idx)
+                if (idx == prev + 1) {
+                    val op = processedTokens[idx].binaryOp.trim()
+                    if (op == "+" || op == "-" || op == "−") {
+                        current.add(idx)
+                    } else {
+                        chains.add(current)
+                        current = mutableListOf(idx)
+                    }
                 } else {
                     chains.add(current)
                     current = mutableListOf(idx)
@@ -925,18 +1021,19 @@ class SmartAccessibilityService : AccessibilityService() {
         }
         if (current.isNotEmpty()) chains.add(current)
 
-        // Step 3: pick the last (rightmost) chain; sum/subtract its tokens.
         val lastChain = chains.last()
-        var value = tokens[lastChain[0]].value
-        for (i in 1 until lastChain.size) {
-            val op = opBetween(lastChain[i - 1], lastChain[i])
-            val nextVal = tokens[lastChain[i]].value
-            if (op == "+") {
-                value += nextVal
-            } else if (op == "-") {
-                value -= nextVal
+
+        // Ignore condition (Requirement 5):
+        // If the chain has multiple calculations and no '=' and no '-' exists, ignore the entire calculation.
+        if (lastChain.size > 1) {
+            val hasEquals = raw.contains("=")
+            val hasMinus = raw.contains("-") || raw.contains("−")
+            if (!hasEquals && !hasMinus) {
+                return null
             }
         }
+
+        val value = evalChain(lastChain)
         return if (value.isFinite()) value else null
     }
 

@@ -68,13 +68,19 @@ class FloatingWindowService : Service() {
     private var bubbleLastX = 0
     private var bubbleLastY = 300
 
+    private var nextSequenceId = 1
+    private var smartSequenceId = 0
+
     // ── Multiple Manual Calculator Instances ──────────────────────────────
     private val manualInstances = mutableListOf<ManualInstance>()
 
     private var smartEtExpr: SmartExpressionEditText? = null
     private var smartScrollExpr: android.widget.HorizontalScrollView? = null
+    private var smartHistorySubView: View? = null
+    private var smartHistorySubParams: WindowManager.LayoutParams? = null
 
     private class ManualInstance(val id: Int) {
+        var sequenceId: Int = 0
         var floatView: View? = null
         var bubbleView: View? = null
         var params: WindowManager.LayoutParams? = null
@@ -95,6 +101,9 @@ class FloatingWindowService : Service() {
         var heightPx: Int = -1
         var lastX: Int = -1
         var lastY: Int = -1
+
+        var historySubView: View? = null
+        var historySubParams: WindowManager.LayoutParams? = null
     }
 
     // ── Receivers ─────────────────────────────────
@@ -105,7 +114,7 @@ class FloatingWindowService : Service() {
                     refreshSmartDisplay()
                     flashSmartTotal()   // visual feedback on each new selection
                 }
-                ACTION_DOCK -> if (currentMode != "bubble") dockToBubble()
+                ACTION_DOCK -> if (currentMode == "smart") dockToBubble()
             }
         }
     }
@@ -154,6 +163,8 @@ class FloatingWindowService : Service() {
         }
         SmartPopupState.isOpen = false
         SmartPopupState.isEditorOpen = false
+        // Send clear broadcast to accessibility service, but do NOT clear HistoryManager
+        // — sessions persist across service restarts
         sendBroadcast(Intent(ACTION_CLEAR_SMART).setPackage(packageName))
         manualInstances.forEach {
             removeInstanceFloat(it)
@@ -178,6 +189,7 @@ class FloatingWindowService : Service() {
 
         if (manualInstances.isEmpty()) {
             val first = ManualInstance(id = 1)
+            first.sequenceId = nextSequenceId++
             manualInstances.add(first)
         }
         
@@ -191,6 +203,7 @@ class FloatingWindowService : Service() {
 
         val restoringFromBubble = instance.isMinimized
         if (instance.isMinimized) {
+            // Remove the bubble FIRST, then show popup
             removeInstanceBubble(instance)
             instance.isMinimized = false
         }
@@ -203,17 +216,37 @@ class FloatingWindowService : Service() {
         // Only update titles when creating (not restoring), to preserve custom titles
         if (!restoringFromBubble) {
             updateInstanceTitles()
+            updateSmartTitle()
         }
 
         // Set the title
         view.findViewById<TextView>(R.id.tvFloatTitle)?.text = instance.titleText
 
-        val params = buildParams(300, 360).apply {
-            if (instance.widthPx != -1) width = instance.widthPx
-            if (instance.heightPx != -1) height = instance.heightPx
-            
-            x = if (instance.lastX != -1) instance.lastX else 80 + (instance.id - 1) * 60
-            y = if (instance.lastY != -1) instance.lastY else 200 + (instance.id - 1) * 80
+        val sp = getSharedPreferences("manual_calc_prefs", MODE_PRIVATE)
+        val everOpened = sp.getBoolean("manual_ever_opened", false)
+        if (everOpened) {
+            if (instance.widthPx == -1) instance.widthPx = sp.getInt("manual_w_${instance.id}", -1)
+            if (instance.heightPx == -1) instance.heightPx = sp.getInt("manual_h_${instance.id}", -1)
+            if (instance.lastX == -1) instance.lastX = sp.getInt("manual_x_${instance.id}", -1)
+            if (instance.lastY == -1) instance.lastY = sp.getInt("manual_y_${instance.id}", -1)
+        }
+
+        // Default size: small (240×320dp) on FIRST ever open, right-aligned
+        // After that, use saved size/position
+        val screenW = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R)
+            wm.currentWindowMetrics.bounds.width()
+        else @Suppress("DEPRECATION") wm.defaultDisplay.width
+
+        val defaultW = dpToPx(240)
+        val defaultH = dpToPx(320)
+        val defaultX = screenW - defaultW - dpToPx(8)  // right-aligned
+        val defaultY = 200 + (instance.sequenceId - 1) * 80
+
+        val params = buildParams(240, 320).apply {
+            width = if (instance.widthPx != -1) instance.widthPx else defaultW
+            height = if (instance.heightPx != -1) instance.heightPx else defaultH
+            x = if (instance.lastX != -1) instance.lastX else defaultX
+            y = if (instance.lastY != -1) instance.lastY else defaultY
         }
         instance.params = params
 
@@ -222,17 +255,35 @@ class FloatingWindowService : Service() {
         
         val resizeBottom = view.findViewById<View>(R.id.resizeBottom)
         if (resizeBottom != null) {
-            attachManualResizeHandles(resizeBottom, view, params)
+            attachManualResizeHandles(resizeBottom, view, params, instance)
         }
         
         wm.addView(view, params)
     }
 
+    private fun updateSmartTitle() {
+        val smartView = floatView
+        if (smartView != null) {
+            val tvSmartTitle = smartView.findViewById<TextView>(R.id.tvSmartTitle)
+            val hasSmart = floatView != null || bubbleView != null
+            val totalActive = manualInstances.size + (if (hasSmart) 1 else 0)
+            if (tvSmartTitle != null) {
+                if (totalActive > 1) {
+                    tvSmartTitle.text = "Smart Calc${smartSequenceId}"
+                } else {
+                    tvSmartTitle.text = "Smart Calc"
+                }
+            }
+        }
+    }
+
     private fun updateInstanceTitles() {
-        if (manualInstances.size > 1) {
-            manualInstances.forEachIndexed { index, inst ->
-                if (inst.titleText == "Calculator") {
-                    inst.titleText = "Calculator${index + 1}"
+        val hasSmart = floatView != null || bubbleView != null
+        val totalActive = manualInstances.size + (if (hasSmart) 1 else 0)
+        if (totalActive > 1) {
+            manualInstances.forEach { inst ->
+                if (inst.titleText == "Calculator" || inst.titleText.matches(Regex("Calculator\\d+"))) {
+                    inst.titleText = "Calculator${inst.sequenceId}"
                     inst.floatView?.findViewById<TextView>(R.id.tvFloatTitle)?.text = inst.titleText
                 }
             }
@@ -252,6 +303,7 @@ class FloatingWindowService : Service() {
         }
         val newId = if (manualInstances.any { it.id == 1 }) 2 else 1
         val newInstance = ManualInstance(newId)
+        newInstance.sequenceId = nextSequenceId++
         
         // Copy the size and offset position from sourceInstance
         sourceInstance.params?.let { p ->
@@ -296,9 +348,9 @@ class FloatingWindowService : Service() {
         // Dynamic text size based on digit count
         val digitCount = bubbleText.count { it.isDigit() }
         val textSizeSp = when {
-            digitCount <= 3 -> 17f
-            digitCount <= 5 -> 14f
-            else -> 15f
+            digitCount <= 3 -> 15f
+            digitCount <= 5 -> 13f
+            else -> 13f
         }
         tvBubble?.textSize = textSizeSp
 
@@ -309,7 +361,7 @@ class FloatingWindowService : Service() {
                     wm.currentWindowMetrics.bounds.width()
                 else
                     @Suppress("DEPRECATION") wm.defaultDisplay.width
-                val bubbleW = if (view.width > 0) view.width else dpToPx(36)
+                val bubbleW = if (view.width > 0) view.width else dpToPx(26)
                 params.x = screenW - bubbleW
                 try { wm.updateViewLayout(view, params) } catch (_: Exception) {}
                 instance.bubbleLastX = params.x
@@ -319,6 +371,7 @@ class FloatingWindowService : Service() {
         }
 
         var initX = 0; var initY = 0; var initRx = 0f; var initRy = 0f; var moved = false
+        var lastTapMs = 0L
 
         view.setOnTouchListener { _, ev ->
             when (ev.action) {
@@ -336,10 +389,21 @@ class FloatingWindowService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!moved) {
-                        instance.bubbleLastX = params.x
-                        instance.bubbleLastY = params.y
-                        removeInstanceBubble(instance)
-                        showManualInstance(instance)
+                        val now = System.currentTimeMillis()
+                        if (now - lastTapMs < 300L) {
+                            // Double-tap: zero out the calculator
+                            resetCalcState(instance)
+                            // Update bubble text to show zero
+                            tvBubble?.text = "0"
+                        } else {
+                            // Single tap: restore popup
+                            instance.bubbleLastX = params.x
+                            instance.bubbleLastY = params.y
+                            // Remove bubble first, then show popup
+                            removeInstanceBubble(instance)
+                            showManualInstance(instance)
+                        }
+                        lastTapMs = now
                     } else {
                         snapInstanceBubble(instance, params)
                     }
@@ -372,11 +436,11 @@ class FloatingWindowService : Service() {
         fun formatWithLimit(value: String): String {
             val formatted = fmtNum(value)
             val digitCount = formatted.count { it.isDigit() }
-            return if (digitCount > 5) instance.id.toString() else formatted
+            return if (digitCount > 5) instance.sequenceId.toString() else formatted
         }
 
         // No expression typed — show serial number
-        if (calcExpr.isEmpty()) return instance.id.toString()
+        if (calcExpr.isEmpty()) return instance.sequenceId.toString()
 
         // Equals pressed — show final result
         if (instance.floatJustEquals) {
@@ -400,10 +464,11 @@ class FloatingWindowService : Service() {
         val currentNum = if (lastOp < 0) displayExpr else displayExpr.substring(lastOp + 1)
         if (currentNum.isNotEmpty() && currentNum != "-") return formatWithLimit(currentNum)
 
-        return instance.id.toString()
+        return instance.sequenceId.toString()
     }
 
     private fun removeInstanceFloat(instance: ManualInstance) {
+        closeManualHistorySubWindow(instance)
         instance.floatView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         instance.floatView = null
     }
@@ -540,16 +605,19 @@ class FloatingWindowService : Service() {
 
         fun onEquals() {
             if (instance.floatExprCalc.isEmpty()) return
-            if (endsWithOp()) {
+            if (instance.floatExprCalc.last().let { it == '+' || it == '-' || it == '*' || it == '/' }) {
                 instance.floatExprDisplay.deleteCharAt(instance.floatExprDisplay.length - 1)
                 instance.floatExprCalc.deleteCharAt(instance.floatExprCalc.length - 1)
             }
             if (instance.floatExprCalc.isEmpty()) return
-            val result = CalculatorEngine.eval(instance.floatExprCalc.toString())
+            val result = CalculatorEngine.eval(instance.floatExprCalc.toString().replace("−", "-"))
             if (result.isNaN() || result.isInfinite()) {
                 display.text = "Error"; exprView.text = ""; return
             }
             val resultStr = fmtResult(result)
+            // Record history line before clearing expression
+            val histLine = "${instance.floatExprDisplay} = $resultStr"
+            ManualHistoryManager.addLine(instance.sequenceId, histLine)
             instance.floatExprDisplay.clear(); instance.floatExprDisplay.append(resultStr)
             instance.floatExprCalc.clear();    instance.floatExprCalc.append(resultStr)
             instance.floatHasDecimal = resultStr.contains('.')
@@ -581,7 +649,25 @@ class FloatingWindowService : Service() {
             v.findViewById<MaterialButton>(id).setOnClickListener { onDigit(d) }
         }
 
-        v.findViewById<MaterialButton>(R.id.btnFloatClear).setOnClickListener     { resetCalcState(instance); update() }
+        // ── Manual History button ──
+        v.findViewById<ImageButton>(R.id.btnManualHistory)?.setOnClickListener {
+            if (instance.historySubView != null) {
+                closeManualHistorySubWindow(instance)
+            } else {
+                showManualHistorySubWindow(instance)
+            }
+        }
+
+        v.findViewById<MaterialButton>(R.id.btnFloatClear).setOnClickListener {
+            // Save current session on AC press
+            ManualHistoryManager.endSession(instance.sequenceId)
+            resetCalcState(instance)
+            update()
+            // Refresh history panel if open in sub-window
+            instance.historySubView?.findViewById<LinearLayout>(R.id.layoutManualHistoryItems)?.let {
+                populateManualHistory(instance, it)
+            }
+        }
         v.findViewById<MaterialButton>(R.id.btnFloatBackspace).setOnClickListener { onBackspace() }
         v.findViewById<MaterialButton>(R.id.btnFloatAdd).setOnClickListener       { onOperator("+") }
         v.findViewById<MaterialButton>(R.id.btnFloatSubtract).setOnClickListener  { onOperator("−") }
@@ -597,7 +683,7 @@ class FloatingWindowService : Service() {
             removeInstanceFloat(instance)
             removeInstanceBubble(instance)
             manualInstances.remove(instance)
-            if (manualInstances.isEmpty()) {
+            if (manualInstances.isEmpty() && floatView == null && bubbleView == null) {
                 stopSelfService()
             } else {
                 updateInstanceTitles()
@@ -730,22 +816,39 @@ class FloatingWindowService : Service() {
         currentMode = "smart"
         preMinimiseMode = "smart"
 
+        if (smartSequenceId == 0) {
+            smartSequenceId = nextSequenceId++
+        }
+
         val view = inflate(R.layout.layout_floating_smart)
         floatView = view
 
         applyPopupTheme(view, PopupThemeManager.getSmartTheme(this), isManual = false)
 
+        val minW = dpToPx(180)
+        val minH = dpToPx(225)
         val sp = getSharedPreferences("smart_calc_prefs", MODE_PRIVATE)
-        val defaultW = dpToPx(180)
-        val defaultH = dpToPx(225)
-        val smartWidth = sp.getInt("smart_width", defaultW)
-        val smartHeight = sp.getInt("smart_height", defaultH)
-        val smartX = sp.getInt("smart_x", 80)
-        val smartY = sp.getInt("smart_y", 200)
+        val defaultX = 80 + (smartSequenceId - 1) * 60
+        val defaultY = 200 + (smartSequenceId - 1) * 80
+        val smartX = sp.getInt("smart_x", defaultX)
+        val smartY = sp.getInt("smart_y", defaultY)
+        val smartW = sp.getInt("smart_width", minW)
+        val smartH = sp.getInt("smart_height", minH)
+
+        val totalActive = manualInstances.size + 1
+        val tvTitle = view.findViewById<TextView>(R.id.tvSmartTitle)
+        if (tvTitle != null) {
+            if (totalActive > 1) {
+                tvTitle.text = "Smart Calc${smartSequenceId}"
+            } else {
+                tvTitle.text = "Smart Calc"
+            }
+        }
+        updateInstanceTitles()
 
         val params = buildParams(180, 225).apply {
-            width = smartWidth
-            height = smartHeight
+            width = smartW
+            height = smartH
             x = smartX
             y = smartY
         }
@@ -828,9 +931,14 @@ class FloatingWindowService : Service() {
     }
 
     private fun wireSmartButtons(v: View) {
-        val histPanel = v.findViewById<LinearLayout>(R.id.layoutHistoryPanel)
-        val histItems = v.findViewById<LinearLayout>(R.id.layoutHistoryItems)
-        val tvHTotal  = v.findViewById<TextView>(R.id.tvHistoryTotal)
+        // ── History button (top-left of header) ──
+        v.findViewById<ImageButton>(R.id.btnSmartHistory)?.setOnClickListener {
+            if (smartHistorySubView != null) {
+                closeSmartHistorySubWindow()
+            } else {
+                showSmartHistorySubWindow()
+            }
+        }
 
         // ── Inline expression editor (tap on history line opens keyboard) ──
         val scrollExpr = v.findViewById<android.widget.HorizontalScrollView>(R.id.scrollSmartExpression)
@@ -857,14 +965,14 @@ class FloatingWindowService : Service() {
             override fun afterTextChanged(s: android.text.Editable?) {
                 val raw = s?.toString().orEmpty().trim()
                 if (raw.isEmpty()) {
-                    v.findViewById<TextView>(R.id.tvSmartTotal)?.text = "0"
+                    v.findViewById<TextView>(R.id.tvSmartTotal)?.text = "= 0"
                     v.findViewById<TextView>(R.id.tvSmartCount)?.text = ""
                     return
                 }
                 val cleanExpr = raw.trimEnd('+', '-', '*', '/', '.')
                 val result = CalculatorEngine.eval(cleanExpr)
                 if (!result.isNaN() && !result.isInfinite()) {
-                    v.findViewById<TextView>(R.id.tvSmartTotal)?.text = CalculatorEngine.formatResult(result)
+                    v.findViewById<TextView>(R.id.tvSmartTotal)?.text = "= " + CalculatorEngine.formatResult(result)
                 }
             }
         })
@@ -933,34 +1041,37 @@ class FloatingWindowService : Service() {
 
         v.findViewById<MaterialButton>(R.id.btnSmartUndo).setOnLongClickListener {
             SmartPopupState.lastClearMs = System.currentTimeMillis()
-            HistoryManager.clear()
-            histPanel.visibility = View.GONE
+            // End session: save current entries to completed sessions, then clear
+            HistoryManager.endCurrentSession()
+            closeSmartHistorySubWindow()
             sendBroadcast(Intent(ACTION_CLEAR_SMART).setPackage(packageName))
-            Toast.makeText(this, "Session cleared", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Session saved", Toast.LENGTH_SHORT).show()
             true
-        }
-
-        v.findViewById<MaterialButton>(R.id.btnClearHistory).setOnClickListener {
-            SmartPopupState.lastClearMs = System.currentTimeMillis()
-            HistoryManager.clear()
-            histPanel.visibility = View.GONE
-            sendBroadcast(Intent(ACTION_CLEAR_SMART).setPackage(packageName))
-            Toast.makeText(this, "Session cleared", Toast.LENGTH_SHORT).show()
         }
 
         val tvSmartTotal = v.findViewById<TextView>(R.id.tvSmartTotal)
         val tvSmartCount = v.findViewById<TextView>(R.id.tvSmartCount)
-        val copyTotalAction = {
-            val result = HistoryManager.formattedTotal()
-            val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("result", result))
-            Toast.makeText(this, "Copied total: $result", Toast.LENGTH_SHORT).show()
+
+        // "= 600" চিহ্নে ক্লিক করলে → সব entry মিলিয়ে একটা টোটাল হয়ে যাবে
+        // condition নেই — ১টা entry হোক বা ১০টা, সবসময় কাজ করবে
+        val equalsMergeAction = {
+            if (HistoryManager.hasEntries()) {
+                val totalVal = HistoryManager.total
+                val entries  = HistoryManager.entries
+                // Save current session before merging
+                HistoryManager.endCurrentSession()
+                // Add the merged total as the single new entry
+                HistoryManager.addEntry(totalVal)
+                refreshSmartDisplay()
+                Toast.makeText(this, "Merged: ${HistoryManager.formattedTotal()}", Toast.LENGTH_SHORT).show()
+            }
         }
+
         if (tvSmartTotal != null) {
-            setDoubleClickListener(tvSmartTotal, copyTotalAction)
+            tvSmartTotal.setOnClickListener { equalsMergeAction() }
         }
         if (tvSmartCount != null) {
-            setDoubleClickListener(tvSmartCount, copyTotalAction)
+            tvSmartCount.setOnClickListener { equalsMergeAction() }
         }
 
 
@@ -972,14 +1083,17 @@ class FloatingWindowService : Service() {
             }
             SmartPopupState.isOpen = false
             SmartPopupState.isEditorOpen = false
+            // Do NOT call HistoryManager.clear() here — sessions persist across open/close
             sendBroadcast(Intent(ACTION_CLEAR_SMART).setPackage(packageName))
             removeFloat()
             removeBubble()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            else
-                @Suppress("DEPRECATION") stopForeground(true)
-            stopSelf()
+            if (manualInstances.isEmpty()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                else
+                    @Suppress("DEPRECATION") stopForeground(true)
+                stopSelf()
+            }
         }
     }
 
@@ -1033,7 +1147,7 @@ class FloatingWindowService : Service() {
 
         v.post {
             // Total
-            v.findViewById<TextView>(R.id.tvSmartTotal)?.text = HistoryManager.formattedTotal()
+            v.findViewById<TextView>(R.id.tvSmartTotal)?.text = "= " + HistoryManager.formattedTotal()
 
             // Selection count label
             val n = HistoryManager.count
@@ -1120,13 +1234,13 @@ class FloatingWindowService : Service() {
                 scrollExpr?.post { scrollExpr.fullScroll(android.view.View.FOCUS_RIGHT) }
             }
 
-            // Refresh history panel if it is open
-            val histPanel = v.findViewById<LinearLayout>(R.id.layoutHistoryPanel)
-            if (histPanel?.visibility == View.VISIBLE) {
-                populateHistory(
-                    v.findViewById(R.id.layoutHistoryItems),
-                    v.findViewById(R.id.tvHistoryTotal)
-                )
+            // Refresh history panel if it is open in sub-window
+            smartHistorySubView?.let { subView ->
+                val subItems = subView.findViewById<LinearLayout>(R.id.layoutHistoryItems)
+                val subTotal = subView.findViewById<TextView>(R.id.tvHistoryTotal)
+                if (subItems != null) {
+                    populateHistory(subItems, subTotal)
+                }
             }
         }
     }
@@ -1148,43 +1262,166 @@ class FloatingWindowService : Service() {
             .start()
     }
 
-    private fun populateHistory(container: LinearLayout, tvTotal: TextView) {
+    private fun populateHistory(container: LinearLayout, tvTotal: TextView?) {
         container.removeAllViews()
-        val entries = HistoryManager.entries
         val isDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-        // Translucent faded colors: 50% opacity white in dark, 50% opacity black in light
-        val textColor = if (isDark) Color.parseColor("#80FFFFFF") else Color.parseColor("#80000000")
-        
-        entries.forEachIndexed { i, entry ->
-            val row = TextView(this).apply {
-                text = if (i == 0) HistoryManager.fmt(entry.value)
-                       else "+ ${HistoryManager.fmt(entry.value)}"
-                textSize   = 14f
-                setTextColor(textColor)
-                setPadding(0, 4, 0, 4)
+        val textColor = if (isDark) Color.parseColor("#CCFFFFFF") else Color.parseColor("#CC000000")
+        val dimColor  = if (isDark) Color.parseColor("#66FFFFFF") else Color.parseColor("#66000000")
+        val dividerColor = if (isDark) Color.parseColor("#33FFFFFF") else Color.parseColor("#33000000")
 
-                // Restore checked/strikethrough state
-                if (entry.isChecked) {
-                    paintFlags = paintFlags or android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
-                } else {
-                    paintFlags = paintFlags and android.graphics.Paint.STRIKE_THRU_TEXT_FLAG.inv()
+        fun addDivider() {
+            val div = android.view.View(this).apply {
+                setBackgroundColor(dividerColor)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1)
+                ).also { it.setMargins(0, dpToPx(4), 0, dpToPx(4)) }
+            }
+            container.addView(div)
+        }
+
+        val sessions = HistoryManager.completedSessions
+        val currentEntries = HistoryManager.entries
+
+        // Show completed sessions — each wrapped in dividers, clickable to restore
+        sessions.forEachIndexed { sIdx, session ->
+            addDivider()
+            session.forEachIndexed { i, entry ->
+                val row = TextView(this).apply {
+                    text = if (i == 0) HistoryManager.fmt(entry.value)
+                           else "+ ${HistoryManager.fmt(entry.value)}"
+                    textSize = 13f
+                    setTextColor(textColor)
+                    setPadding(dpToPx(4), dpToPx(3), dpToPx(4), dpToPx(3))
                 }
-
-                // Toggle checked state on double click
-                setDoubleClickListener(this) {
-                    entry.isChecked = !entry.isChecked
-                    if (entry.isChecked) {
-                        paintFlags = paintFlags or android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
-                    } else {
-                        paintFlags = paintFlags and android.graphics.Paint.STRIKE_THRU_TEXT_FLAG.inv()
-                    }
+                container.addView(row)
+            }
+            val sessionSum = session.sumOf { it.value }
+            val sumRow = TextView(this).apply {
+                text = "= ${HistoryManager.fmt(sessionSum)}"
+                textSize = 14f
+                setTextColor(Color.parseColor("#FFFF9F0A"))
+                setPadding(dpToPx(4), dpToPx(2), dpToPx(4), dpToPx(4))
+                // Click to load this session back into the display
+                setOnClickListener {
+                    HistoryManager.clear()
+                    for (e in session) HistoryManager.addEntry(e.value, e.source)
+                    refreshSmartDisplay()
+                    Toast.makeText(this@FloatingWindowService, "Session loaded", Toast.LENGTH_SHORT).show()
                 }
             }
-            container.addView(row)
+            container.addView(sumRow)
+            addDivider()
         }
-        tvTotal.text = "Total: ${HistoryManager.formattedTotal()}"
-        tvTotal.setTextColor(Color.parseColor("#FFFF9F0A"))
+
+        // Show current in-progress entries at the bottom
+        if (currentEntries.isNotEmpty()) {
+            if (sessions.isNotEmpty()) {
+                val curLabel = TextView(this).apply {
+                    text = "Current"
+                    textSize = 10f
+                    setTextColor(dimColor)
+                    setPadding(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(2))
+                }
+                container.addView(curLabel)
+            }
+            currentEntries.forEachIndexed { i, entry ->
+                val row = TextView(this).apply {
+                    text = if (i == 0) HistoryManager.fmt(entry.value)
+                           else "+ ${HistoryManager.fmt(entry.value)}"
+                    textSize = 13f
+                    setTextColor(textColor)
+                    setPadding(dpToPx(4), dpToPx(3), dpToPx(4), dpToPx(3))
+                }
+                container.addView(row)
+            }
+        }
+
+        if (sessions.isEmpty() && currentEntries.isEmpty()) {
+            val empty = TextView(this).apply {
+                text = "No history yet"
+                textSize = 13f
+                setTextColor(dimColor)
+                gravity = android.view.Gravity.CENTER
+                setPadding(0, dpToPx(16), 0, dpToPx(16))
+            }
+            container.addView(empty)
+        }
+
+        tvTotal?.text = "Total: ${HistoryManager.formattedTotal()}"
+        tvTotal?.setTextColor(Color.parseColor("#FFFF9F0A"))
     }
+
+    // performEqualSignReplacement removed — total click now only copies the value
+
+    private fun populateManualHistory(instance: ManualInstance, container: LinearLayout) {
+        container.removeAllViews()
+        val isDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val textColor = if (isDark) Color.parseColor("#CCFFFFFF") else Color.parseColor("#CC000000")
+        val dimColor  = if (isDark) Color.parseColor("#66FFFFFF") else Color.parseColor("#66000000")
+        val dividerColor = if (isDark) Color.parseColor("#33FFFFFF") else Color.parseColor("#33000000")
+
+        fun addDivider() {
+            val div = android.view.View(this).apply {
+                setBackgroundColor(dividerColor)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1)
+                ).also { it.setMargins(0, dpToPx(3), 0, dpToPx(3)) }
+            }
+            container.addView(div)
+        }
+
+        val sessions = ManualHistoryManager.getCompletedSessions(instance.sequenceId)
+        val currentLines = ManualHistoryManager.getCurrentLines(instance.sequenceId)
+
+        // Completed sessions
+        sessions.forEach { session ->
+            addDivider()
+            session.entries.forEach { line ->
+                val row = TextView(this).apply {
+                    text = line
+                    textSize = 12f
+                    setTextColor(textColor)
+                    setPadding(dpToPx(4), dpToPx(2), dpToPx(4), dpToPx(2))
+                }
+                container.addView(row)
+            }
+            addDivider()
+        }
+
+        // Current in-progress lines
+        if (currentLines.isNotEmpty()) {
+            if (sessions.isNotEmpty()) {
+                val curLabel = TextView(this).apply {
+                    text = "Current"
+                    textSize = 10f
+                    setTextColor(dimColor)
+                    setPadding(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(2))
+                }
+                container.addView(curLabel)
+            }
+            currentLines.forEach { line ->
+                val row = TextView(this).apply {
+                    text = line
+                    textSize = 12f
+                    setTextColor(textColor)
+                    setPadding(dpToPx(4), dpToPx(2), dpToPx(4), dpToPx(2))
+                }
+                container.addView(row)
+            }
+        }
+
+        if (sessions.isEmpty() && currentLines.isEmpty()) {
+            val empty = TextView(this).apply {
+                text = "No history yet"
+                textSize = 12f
+                setTextColor(dimColor)
+                gravity = android.view.Gravity.CENTER
+                setPadding(0, dpToPx(12), 0, dpToPx(12))
+            }
+            container.addView(empty)
+        }
+    }
+
 
     // ─────────────────────────────────────────────
     // Bubble (minimised)
@@ -1227,7 +1464,7 @@ class FloatingWindowService : Service() {
                 wm.currentWindowMetrics.bounds.width()
             else
                 @Suppress("DEPRECATION") wm.defaultDisplay.width
-            val bubbleW = if (view.width > 0) view.width else dpToPx(30)
+            val bubbleW = if (view.width > 0) view.width else dpToPx(26)
             params.x = screenW - bubbleW
             try { wm.updateViewLayout(view, params) } catch (_: Exception) {}
             bubbleLastX = params.x
@@ -1235,6 +1472,7 @@ class FloatingWindowService : Service() {
         }
 
         var initX = 0; var initY = 0; var initRx = 0f; var initRy = 0f; var moved = false
+        var lastTapMs = 0L
 
         view.setOnTouchListener { _, ev ->
             when (ev.action) {
@@ -1246,16 +1484,28 @@ class FloatingWindowService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     params.x = initX + (ev.rawX - initRx).toInt()
                     params.y = initY + (ev.rawY - initRy).toInt()
-                    wm.updateViewLayout(view, params)
+                    try { wm.updateViewLayout(view, params) } catch (_: Exception) {}
                     if (Math.abs(ev.rawX - initRx) > 8 || Math.abs(ev.rawY - initRy) > 8) moved = true
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!moved) {
-                        bubbleLastX = params.x
-                        bubbleLastY = params.y
-                        removeBubble()
-                        if (preMinimiseMode == "smart") showSmart() else showManual()
+                        val now = System.currentTimeMillis()
+                        if (now - lastTapMs < 300L) {
+                            // Double-tap: zero out smart total (clear current entries)
+                            HistoryManager.clear()
+                            // Update bubble text
+                            tvBubble?.text = "0"
+                            sendBroadcast(Intent(ACTION_CLEAR_SMART).setPackage(packageName))
+                        } else {
+                            // Single tap: restore popup
+                            bubbleLastX = params.x
+                            bubbleLastY = params.y
+                            // Remove bubble FIRST, then show smart
+                            removeBubble()
+                            showSmart()
+                        }
+                        lastTapMs = now
                     } else {
                         snapBubble(params)
                     }
@@ -1297,11 +1547,23 @@ class FloatingWindowService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     params.x = initX + (ev.rawX - initRx).toInt()
                     params.y = initY + (ev.rawY - initRy).toInt()
-                    wm.updateViewLayout(root, params); true
+                    wm.updateViewLayout(root, params)
+                    if (root == floatView) {
+                        updateSmartHistorySubWindowPos(params)
+                    } else {
+                        manualInstances.find { it.floatView == root }?.let { inst ->
+                            updateManualHistorySubWindowPos(inst, params)
+                        }
+                    }
+                    true
                 }
                 MotionEvent.ACTION_UP -> {
                     if (root == floatView) {
                         saveSmartWindowSizeAndPos(params.width, params.height, params.x, params.y)
+                    } else {
+                        manualInstances.find { it.floatView == root }?.let { inst ->
+                            saveManualInstanceSizeAndPos(inst.id, params.width, params.height, params.x, params.y)
+                        }
                     }
                     false
                 }
@@ -1318,7 +1580,8 @@ class FloatingWindowService : Service() {
     private fun attachManualResizeHandles(
         handleBottom: View,
         root: View,
-        params: LayoutParams
+        params: LayoutParams,
+        instance: ManualInstance
     ) {
         val minW = dpToPx(180); val minH = dpToPx(240)
         var startW = 0; var startH = 0; var startX = 0
@@ -1369,7 +1632,13 @@ class FloatingWindowService : Service() {
                         }
                         else -> params.height = newH // height only
                     }
-                    wm.updateViewLayout(root, params); true
+                    wm.updateViewLayout(root, params)
+                    updateManualHistorySubWindowPos(instance, params)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    saveManualInstanceSizeAndPos(instance.id, params.width, params.height, params.x, params.y)
+                    false
                 }
                 else -> false
             }
@@ -1420,7 +1689,9 @@ class FloatingWindowService : Service() {
                     val newW = (startW + (ev.rawX - startRx).toInt()).coerceIn(minW, maxW)
                     val newH = (startH + (ev.rawY - startRy).toInt()).coerceIn(minH, maxH)
                     params.width = newW; params.height = newH
-                    wm.updateViewLayout(root, params); true
+                    wm.updateViewLayout(root, params)
+                    updateSmartHistorySubWindowPos(params)
+                    true
                 }
                 MotionEvent.ACTION_UP -> {
                     saveSmartWindowSizeAndPos(params.width, params.height, params.x, params.y)
@@ -1446,7 +1717,9 @@ class FloatingWindowService : Service() {
                     val actualDx = startW - newW
                     params.x = startX + actualDx
                     params.width = newW; params.height = newH
-                    wm.updateViewLayout(root, params); true
+                    wm.updateViewLayout(root, params)
+                    updateSmartHistorySubWindowPos(params)
+                    true
                 }
                 MotionEvent.ACTION_UP -> {
                     saveSmartWindowSizeAndPos(params.width, params.height, params.x, params.y)
@@ -1485,13 +1758,7 @@ class FloatingWindowService : Service() {
      * Light theme = translucent white background, dark text.
      */
     private fun applyPopupTheme(root: View, theme: Int, isManual: Boolean) {
-        val isDark = if (!isManual) {
-            // For Smart mode, follow the system's night mode automatically
-            (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-        } else {
-            // For Manual mode, follow the manual preference
-            theme == PopupThemeManager.DARK
-        }
+        val isDark = theme == PopupThemeManager.DARK
 
         val contentView: View = if (isManual)
             root.findViewById(R.id.manualFloatContent) ?: root
@@ -1715,9 +1982,23 @@ class FloatingWindowService : Service() {
             .apply()
     }
 
+    private fun saveManualInstanceSizeAndPos(instanceId: Int, width: Int, height: Int, x: Int, y: Int) {
+        val sp = getSharedPreferences("manual_calc_prefs", MODE_PRIVATE)
+        sp.edit()
+            .putInt("manual_w_$instanceId", width)
+            .putInt("manual_h_$instanceId", height)
+            .putInt("manual_x_$instanceId", x)
+            .putInt("manual_y_$instanceId", y)
+            .putBoolean("manual_ever_opened", true)
+            .apply()
+    }
+
     private fun getSmartBubbleText(): String {
+        if (!HistoryManager.hasEntries()) {
+            return smartSequenceId.toString()
+        }
         val totalVal = HistoryManager.total
-        if (totalVal.isNaN() || totalVal.isInfinite()) return "0"
+        if (totalVal.isNaN() || totalVal.isInfinite()) return smartSequenceId.toString()
         val rawFmt = HistoryManager.formattedTotal()
         val digits = rawFmt.count { it.isDigit() }
         if (digits <= 5) return rawFmt
@@ -1732,10 +2013,11 @@ class FloatingWindowService : Service() {
             val kStr = "${kValue}k"
             if (kStr.length <= 5) return kStr
         }
-        return intStr.take(5)
+        return smartSequenceId.toString()
     }
 
     private fun removeFloat() {
+        closeSmartHistorySubWindow()
         floatView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         floatView = null
     }
@@ -1743,6 +2025,111 @@ class FloatingWindowService : Service() {
     private fun removeBubble() {
         bubbleView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         bubbleView = null
+    }
+
+    private fun showManualHistorySubWindow(instance: ManualInstance) {
+        if (instance.historySubView != null) return // Already open
+        val mainParams = instance.params ?: return
+
+        val view = inflate(R.layout.layout_history_sub_manual)
+        instance.historySubView = view
+
+        applyPopupTheme(view, PopupThemeManager.getManualTheme(this), isManual = true)
+
+        val itemsContainer = view.findViewById<LinearLayout>(R.id.layoutManualHistoryItems)
+        if (itemsContainer != null) {
+            populateManualHistory(instance, itemsContainer)
+        }
+
+        view.findViewById<ImageButton>(R.id.btnSubHistoryClose)?.setOnClickListener {
+            closeManualHistorySubWindow(instance)
+        }
+
+        // Sub window height = 180dp
+        val subH = dpToPx(180)
+        
+        val subParams = buildParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+            width = mainParams.width
+            height = subH
+            x = mainParams.x
+            y = mainParams.y + mainParams.height
+            flags = LayoutParams.FLAG_NOT_FOCUSABLE or LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        }
+        instance.historySubParams = subParams
+
+        wm.addView(view, subParams)
+    }
+
+    private fun closeManualHistorySubWindow(instance: ManualInstance) {
+        instance.historySubView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        instance.historySubView = null
+        instance.historySubParams = null
+    }
+
+    private fun updateManualHistorySubWindowPos(instance: ManualInstance, mainParams: LayoutParams) {
+        val subView = instance.historySubView ?: return
+        val subParams = instance.historySubParams ?: return
+        subParams.x = mainParams.x
+        subParams.y = mainParams.y + mainParams.height
+        subParams.width = mainParams.width
+        try { wm.updateViewLayout(subView, subParams) } catch (_: Exception) {}
+    }
+
+    private fun showSmartHistorySubWindow() {
+        if (smartHistorySubView != null) return // Already open
+        val mainParams = floatView?.layoutParams as? WindowManager.LayoutParams ?: return
+
+        val view = inflate(R.layout.layout_history_sub_smart)
+        smartHistorySubView = view
+
+        applyPopupTheme(view, PopupThemeManager.getSmartTheme(this), isManual = false)
+
+        val itemsContainer = view.findViewById<LinearLayout>(R.id.layoutHistoryItems)
+        val tvHistoryTotal = view.findViewById<TextView>(R.id.tvHistoryTotal)
+        if (itemsContainer != null) {
+            populateHistory(itemsContainer, tvHistoryTotal)
+        }
+
+        view.findViewById<ImageButton>(R.id.btnSubHistoryClose)?.setOnClickListener {
+            closeSmartHistorySubWindow()
+        }
+
+        view.findViewById<MaterialButton>(R.id.btnClearHistory)?.setOnClickListener {
+            SmartPopupState.lastClearMs = System.currentTimeMillis()
+            HistoryManager.endCurrentSession()
+            closeSmartHistorySubWindow()
+            sendBroadcast(Intent(ACTION_CLEAR_SMART).setPackage(packageName))
+            Toast.makeText(this, "Session saved", Toast.LENGTH_SHORT).show()
+        }
+
+        // Sub window height = 180dp
+        val subH = dpToPx(180)
+        
+        val subParams = buildParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+            width = mainParams.width
+            height = subH
+            x = mainParams.x
+            y = mainParams.y + mainParams.height
+            flags = LayoutParams.FLAG_NOT_FOCUSABLE or LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        }
+        smartHistorySubParams = subParams
+
+        wm.addView(view, subParams)
+    }
+
+    private fun closeSmartHistorySubWindow() {
+        smartHistorySubView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        smartHistorySubView = null
+        smartHistorySubParams = null
+    }
+
+    private fun updateSmartHistorySubWindowPos(mainParams: LayoutParams) {
+        val subView = smartHistorySubView ?: return
+        val subParams = smartHistorySubParams ?: return
+        subParams.x = mainParams.x
+        subParams.y = mainParams.y + mainParams.height
+        subParams.width = mainParams.width
+        try { wm.updateViewLayout(subView, subParams) } catch (_: Exception) {}
     }
 
     // ─────────────────────────────────────────────
@@ -1776,12 +2163,4 @@ class FloatingWindowService : Service() {
     }
 }
 
-// Extension to expose fmt() from HistoryManager
-fun HistoryManager.fmt(v: Double): String {
-    if (v.isNaN() || v.isInfinite()) return "Error"
-    val bd = java.math.BigDecimal(v).setScale(10, java.math.RoundingMode.HALF_UP).stripTrailingZeros()
-    val plain = bd.toPlainString()
-    return if (plain.contains('.') && plain.length > 10)
-        java.math.BigDecimal(v).setScale(4, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
-    else plain
-}
+

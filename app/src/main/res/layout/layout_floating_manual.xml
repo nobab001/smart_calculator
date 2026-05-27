@@ -3,7 +3,7 @@
     Floating Manual Calculator
     Root = FrameLayout so the resize handle can be pinned to the bottom-right corner.
     Inner LinearLayout carries the actual content + rounded background.
-    Initial size: 300 × 415 dp (set in FloatingWindowService buildParams).
+    Initial size: 240 × 320 dp (set in FloatingWindowService buildParams).
     The GridLayout fills remaining space with layout_weight="1" so all rows
     scale proportionally when the user resizes the window.
 -->
@@ -35,6 +35,19 @@
             android:paddingLeft="10dp"
             android:paddingRight="10dp"
             android:background="@color/bg_float_header">
+
+            <!-- History button on LEFT of title -->
+            <ImageButton
+                android:id="@+id/btnManualHistory"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@drawable/ic_history"
+                android:background="@drawable/bg_icon_btn"
+                android:contentDescription="History"
+                android:padding="4dp"
+                android:alpha="0.75"/>
+
+            <Space android:layout_width="4dp" android:layout_height="1dp"/>
 
             <FrameLayout
                 android:layout_width="0dp"
@@ -344,6 +357,8 @@
                 android:layout_height="0dp"/>
 
         </GridLayout>
+
+
 
     </LinearLayout>
 

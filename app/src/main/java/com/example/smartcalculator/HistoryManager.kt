@@ -6,6 +6,12 @@ import java.math.RoundingMode
 /**
  * Singleton that holds the Smart Mode calculation history for the current session.
  * Both [FloatingWindowService] and [SmartAccessibilityService] read/write this object.
+ *
+ * Sessions:
+ *  - _entries = current in-progress entries
+ *  - _completedSessions = list of past completed sessions (each a list of entries)
+ *  - A session is "completed" when the user long-presses Undo (All Clear).
+ *  - Completed sessions persist even when the Smart popup is closed/reopened.
  */
 object HistoryManager {
 
@@ -24,6 +30,20 @@ object HistoryManager {
 
     val count: Int get() = _entries.size
 
+    // List of completed sessions — persists across popup open/close
+    private val _completedSessions = mutableListOf<List<Entry>>()
+    val completedSessions: List<List<Entry>> get() = _completedSessions
+
+    fun addCompletedSession(session: List<Entry>) {
+        if (session.isNotEmpty()) {
+            _completedSessions.add(session.toList())
+        }
+    }
+
+    fun clearCompletedSessions() {
+        _completedSessions.clear()
+    }
+
     /** Called whenever the history changes — UI updates hook here. */
     var onChanged: (() -> Unit)? = null
 
@@ -37,8 +57,38 @@ object HistoryManager {
 
     var isExpressionChecked: Boolean = false
 
+    /**
+     * Clears only the current session entries.
+     * Completed sessions are preserved (they persist across popup open/close).
+     */
     fun clear() {
         _entries.clear()
+        isExpressionChecked = false
+        onChanged?.invoke()
+        onCleared?.invoke()
+    }
+
+    /**
+     * Ends the current session: saves current entries to completedSessions, then clears entries.
+     * Call this on long-press Undo (All Clear) in Smart mode.
+     */
+    fun endCurrentSession() {
+        if (_entries.isNotEmpty()) {
+            _completedSessions.add(_entries.toList())
+        }
+        _entries.clear()
+        isExpressionChecked = false
+        onChanged?.invoke()
+        onCleared?.invoke()
+    }
+
+    /**
+     * Full reset: clears both current entries and all completed sessions.
+     * Use only when a completely fresh start is needed.
+     */
+    fun clearAll() {
+        _entries.clear()
+        _completedSessions.clear()
         isExpressionChecked = false
         onChanged?.invoke()
         onCleared?.invoke()
@@ -64,6 +114,8 @@ object HistoryManager {
     }
 
     fun hasEntries() = _entries.isNotEmpty()
+
+    fun hasAnyHistory() = _entries.isNotEmpty() || _completedSessions.isNotEmpty()
 
     /**
      * Returns a readable expression string like "100 + 250.5 + 30"
