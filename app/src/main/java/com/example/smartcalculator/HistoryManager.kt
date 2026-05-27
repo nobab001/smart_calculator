@@ -28,7 +28,7 @@ object HistoryManager {
 
     val total: Double get() = _entries.sumOf { it.value }
 
-    val count: Int get() = _entries.size
+    val count: Int get() = _entries.count { it.source != "Result" }
 
     // List of completed sessions — persists across popup open/close
     private val _completedSessions = mutableListOf<List<Entry>>()

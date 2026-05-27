@@ -150,6 +150,20 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp">
 
+                <!-- Large total number -->
+                <TextView
+                    android:id="@+id/tvSmartTotal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="0"
+                    android:textColor="@color/text_primary"
+                    android:textSize="30sp"
+                    android:gravity="center"
+                    android:singleLine="true"
+                    android:ellipsize="start"
+                    android:fontFamily="sans-serif-light"
+                    android:includeFontPadding="false"/>
+
                 <!-- Dimmed "=" sign, far left, clickable to toggle badge -->
                 <TextView
                     android:id="@+id/tvSmartEquals"
@@ -168,21 +182,6 @@
                     android:paddingEnd="12dp"
                     android:clickable="true"
                     android:focusable="true"/>
-
-                <!-- Large total number -->
-                <TextView
-                    android:id="@+id/tvSmartTotal"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_toEndOf="@id/tvSmartEquals"
-                    android:text="0"
-                    android:textColor="@color/text_primary"
-                    android:textSize="30sp"
-                    android:gravity="center"
-                    android:singleLine="true"
-                    android:ellipsize="start"
-                    android:fontFamily="sans-serif-light"
-                    android:includeFontPadding="false"/>
             </RelativeLayout>
 
             <!-- Item count / equals badge row -->
