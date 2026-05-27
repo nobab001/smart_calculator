@@ -69,6 +69,17 @@ object HistoryManager {
     }
 
     /**
+     * Clears only the current session entries and sets a single new entry.
+     */
+    fun clearAndSetSingle(value: Double, source: String = "") {
+        _entries.clear()
+        _entries.add(Entry(value, source))
+        isExpressionChecked = false
+        onChanged?.invoke()
+        onCleared?.invoke()
+    }
+
+    /**
      * Ends the current session: saves current entries to completedSessions, then clears entries.
      * Call this on long-press Undo (All Clear) in Smart mode.
      */

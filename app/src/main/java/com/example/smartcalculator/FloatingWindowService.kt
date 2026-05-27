@@ -1066,16 +1066,11 @@ class FloatingWindowService : Service() {
             lastTotalClickMs = System.currentTimeMillis()
         }
 
-        // "=" sign click → toggle equals badge in count row
+        // "=" sign click → clear history and keep the total result in history
         tvSmartEquals?.setOnClickListener {
-            val countTv = tvSmartCount ?: return@setOnClickListener
-            if (countTv.text.toString() == "=") {
-                // Badge already showing "=" → restore normal count text
-                refreshSmartDisplay()
-            } else {
-                // Move "=" down to the count row
-                countTv.text = "="
-            }
+            val totalVal = HistoryManager.total
+            HistoryManager.clearAndSetSingle(totalVal, "Result")
+            sendBroadcast(Intent(ACTION_CLEAR_SMART).setPackage(packageName))
         }
 
 
