@@ -1160,7 +1160,7 @@ class FloatingWindowService : Service() {
             if (exprContainer != null) {
                 exprContainer.removeAllViews()
                 val entries = HistoryManager.entries
-                val isDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+                val isDark = PopupThemeManager.getSmartTheme(this@FloatingWindowService) == PopupThemeManager.DARK
                 val exprColor = if (isDark) android.graphics.Color.parseColor("#80FFFFFF") else android.graphics.Color.parseColor("#80000000")
 
                 entries.forEachIndexed { i, entry ->
@@ -1264,7 +1264,7 @@ class FloatingWindowService : Service() {
 
     private fun populateHistory(container: LinearLayout, tvTotal: TextView?) {
         container.removeAllViews()
-        val isDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val isDark = PopupThemeManager.getSmartTheme(this) == PopupThemeManager.DARK
         val textColor = if (isDark) Color.parseColor("#CCFFFFFF") else Color.parseColor("#CC000000")
         val dimColor  = if (isDark) Color.parseColor("#66FFFFFF") else Color.parseColor("#66000000")
         val dividerColor = if (isDark) Color.parseColor("#33FFFFFF") else Color.parseColor("#33000000")
@@ -1355,7 +1355,7 @@ class FloatingWindowService : Service() {
 
     private fun populateManualHistory(instance: ManualInstance, container: LinearLayout) {
         container.removeAllViews()
-        val isDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val isDark = PopupThemeManager.getManualTheme(this) == PopupThemeManager.DARK
         val textColor = if (isDark) Color.parseColor("#CCFFFFFF") else Color.parseColor("#CC000000")
         val dimColor  = if (isDark) Color.parseColor("#66FFFFFF") else Color.parseColor("#66000000")
         val dividerColor = if (isDark) Color.parseColor("#33FFFFFF") else Color.parseColor("#33000000")
