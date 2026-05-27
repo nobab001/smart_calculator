@@ -1538,17 +1538,23 @@ class FloatingWindowService : Service() {
 
     private fun makeDraggable(handle: View, root: View, params: LayoutParams) {
         var initX = 0; var initY = 0; var initRx = 0f; var initRy = 0f
+        var moved = false
 
         handle.setOnTouchListener { _, ev ->
             when (ev.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initX = params.x; initY = params.y
-                    initRx = ev.rawX; initRy = ev.rawY; true
+                    initRx = ev.rawX; initRy = ev.rawY
+                    moved = false
+                    true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initX + (ev.rawX - initRx).toInt()
-                    params.y = initY + (ev.rawY - initRy).toInt()
+                    val dx = (ev.rawX - initRx).toInt()
+                    val dy = (ev.rawY - initRy).toInt()
+                    params.x = initX + dx
+                    params.y = initY + dy
                     wm.updateViewLayout(root, params)
+                    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) moved = true
                     if (root == floatView) {
                         updateSmartHistorySubWindowPos(params)
                     } else {
@@ -1559,11 +1565,13 @@ class FloatingWindowService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (root == floatView) {
-                        saveSmartWindowSizeAndPos(params.width, params.height, params.x, params.y)
-                    } else {
-                        manualInstances.find { it.floatView == root }?.let { inst ->
-                            saveManualInstanceSizeAndPos(inst.id, params.width, params.height, params.x, params.y)
+                    if (moved) {
+                        if (root == floatView) {
+                            saveSmartWindowSizeAndPos(params.width, params.height, params.x, params.y)
+                        } else {
+                            manualInstances.find { it.floatView == root }?.let { inst ->
+                                saveManualInstanceSizeAndPos(inst.id, params.width, params.height, params.x, params.y)
+                            }
                         }
                     }
                     false
