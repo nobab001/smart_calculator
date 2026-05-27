@@ -1458,7 +1458,7 @@ class FloatingWindowService : Service() {
         if (preMinimiseMode == "smart") {
             val bubbleText = getSmartBubbleText()
             tvBubble?.text = bubbleText
-            tvBubble?.setTextColor(Color.BLACK)
+            tvBubble?.setTextColor(Color.parseColor("#55000000"))
         } else {
             tvBubble?.text = "⊞"
         }

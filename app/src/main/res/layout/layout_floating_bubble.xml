@@ -7,24 +7,22 @@
     android:layout_height="wrap_content"
     android:minWidth="26dp"
     android:minHeight="26dp"
-    android:paddingLeft="5dp"
-    android:paddingRight="5dp"
-    android:paddingTop="3dp"
-    android:paddingBottom="3dp"
+    android:paddingLeft="4dp"
+    android:paddingRight="4dp"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp"
     android:background="@drawable/bg_bubble"
-    android:elevation="8dp"
-    android:alpha="0.60">
+    android:elevation="0dp">
 
     <TextView
         android:id="@+id/tvBubbleText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:text=""
-        android:textColor="#CC000000"
-        android:textSize="14sp"
+        android:text="⊞"
+        android:textColor="#55000000"
+        android:textSize="15sp"
         android:singleLine="true"
         android:fontFamily="sans-serif-medium"/>
 
 </FrameLayout>
-
